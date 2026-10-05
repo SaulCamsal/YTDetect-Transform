@@ -1,1 +1,6 @@
 /Context Docs
+target/
+*.class
+.idea/
+*.iml
+
