@@ -20,6 +20,7 @@
 
     <modules>
         <module>yt-common</module>
+        <module>yt-api</module>
     </modules>
 
     <properties>

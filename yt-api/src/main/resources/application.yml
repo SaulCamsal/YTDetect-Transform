@@ -1,0 +1,31 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: yt-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:sqlserver://localhost:1433;databaseName=MonitorTranscription;encrypt=true;trustServerCertificate=true}
+    username: ${SPRING_DATASOURCE_USERNAME:yt_app}
+    password: ${SPRING_DATASOURCE_PASSWORD:password}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_schema: youtube
+    open-in-view: false
+
+yt:
+  security:
+    api-key: ${YT_API_KEY:default-secret-key}
+  youtube:
+    application-name: YTDetect-Transform
+    api-key: ${YOUTUBE_API_KEY:}
+    client-id: ${YOUTUBE_CLIENT_ID:}
+    client-secret: ${YOUTUBE_CLIENT_SECRET:}
+    refresh-token: ${YOUTUBE_REFRESH_TOKEN:}
+  sync:
+    cron: "0 0 3 * * *"
+    enabled: true
