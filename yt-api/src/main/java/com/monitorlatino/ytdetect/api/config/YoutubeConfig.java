@@ -22,6 +22,10 @@ public class YoutubeConfig {
     private final String clientSecret;
     private final String refreshToken;
 
+    public YoutubeConfig() {
+        this("YTDetect-Transform", "", "", "", "");
+    }
+
     public YoutubeConfig(
             @Value("${yt.youtube.application-name:YTDetect-Transform}") String applicationName,
             @Value("${yt.youtube.api-key:}") String apiKey,

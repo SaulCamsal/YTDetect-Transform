@@ -29,3 +29,15 @@ yt:
   sync:
     cron: "0 0 3 * * *"
     enabled: true
+  polling:
+    delay: 1800000
+    enabled: true
+  live-watcher:
+    delay: 600000
+    enabled: true
+  websub:
+    hub-url: "https://pubsubhubbub.appspot.com/"
+    callback-url: ${YT_WEBSUB_CALLBACK_URL:https://example.com/api/v1/youtube/websub/callback}
+    secret: ${YT_WEBSUB_SECRET:ytdetect-websub-secret}
+  sqs:
+    download-queue: ${YT_SQS_DOWNLOAD_QUEUE:youtube-download-queue}
