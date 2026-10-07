@@ -15,6 +15,8 @@ spring:
     properties:
       hibernate:
         default_schema: youtube
+        type:
+          preferred_instant_jdbc_type: TIMESTAMP
     open-in-view: false
 
 yt:

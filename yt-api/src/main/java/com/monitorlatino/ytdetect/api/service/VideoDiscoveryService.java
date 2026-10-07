@@ -172,7 +172,11 @@ public class VideoDiscoveryService {
             log.info("Saved discovered video: {} status: {} channel: {}", videoId, status, channelId);
 
             if (status == VideoStatus.QUEUED_DOWNLOAD) {
-                queueService.enqueueDownloadJob(DownloadJobMessage.of(videoId, channelId));
+                try {
+                    queueService.enqueueDownloadJob(DownloadJobMessage.of(videoId, channelId));
+                } catch (Exception e) {
+                    log.error("Failed to enqueue download job to SQS for video {}: {}", videoId, e.getMessage());
+                }
             }
 
             return Optional.of(saved);

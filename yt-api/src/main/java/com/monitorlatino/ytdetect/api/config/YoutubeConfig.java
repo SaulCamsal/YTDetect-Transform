@@ -26,6 +26,7 @@ public class YoutubeConfig {
         this("YTDetect-Transform", "", "", "", "");
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
     public YoutubeConfig(
             @Value("${yt.youtube.application-name:YTDetect-Transform}") String applicationName,
             @Value("${yt.youtube.api-key:}") String apiKey,
@@ -59,7 +60,7 @@ public class YoutubeConfig {
                     .setApplicationName(applicationName)
                     .build();
         } else {
-            log.info("Configuring YouTube client without OAuth2 (fallback)");
+            log.info("Configuring YouTube client without OAuth2 (fallback). API key configured: {}", (apiKey != null && !apiKey.isBlank()));
             return new YouTube.Builder(httpTransport, jsonFactory, httpRequest -> {
             })
                     .setApplicationName(applicationName)
