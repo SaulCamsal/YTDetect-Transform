@@ -41,3 +41,11 @@ yt:
     secret: ${YT_WEBSUB_SECRET:ytdetect-websub-secret}
   sqs:
     download-queue: ${YT_SQS_DOWNLOAD_QUEUE:youtube-download-queue}
+  transcription-sync:
+    delay: 60000
+    enabled: true
+
+external:
+  transcription:
+    url: ${EXTERNAL_TRANSCRIPTION_URL:https://transcript.monitorlatino.com/api/v1}
+    api-key: ${EXTERNAL_TRANSCRIPTION_API_KEY:default-transcription-key}

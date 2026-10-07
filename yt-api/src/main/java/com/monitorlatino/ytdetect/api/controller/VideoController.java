@@ -1,7 +1,9 @@
 package com.monitorlatino.ytdetect.api.controller;
 
+import com.monitorlatino.ytdetect.api.dto.FullVideoTranscriptResponse;
 import com.monitorlatino.ytdetect.api.dto.VideoResponse;
 import com.monitorlatino.ytdetect.api.dto.VideoTranscriptionResponse;
+import com.monitorlatino.ytdetect.api.service.VideoTranscriptAssemblyService;
 import com.monitorlatino.ytdetect.api.service.YoutubeVideoService;
 import com.monitorlatino.ytdetect.common.domain.enums.VideoStatus;
 import org.springframework.data.domain.Page;
@@ -19,9 +21,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class VideoController {
 
     private final YoutubeVideoService videoService;
+    private final VideoTranscriptAssemblyService transcriptAssemblyService;
 
-    public VideoController(YoutubeVideoService videoService) {
+    public VideoController(
+            YoutubeVideoService videoService,
+            VideoTranscriptAssemblyService transcriptAssemblyService) {
         this.videoService = videoService;
+        this.transcriptAssemblyService = transcriptAssemblyService;
     }
 
     @GetMapping
@@ -42,6 +48,14 @@ public class VideoController {
     @GetMapping("/{videoId}/transcription")
     public ResponseEntity<VideoTranscriptionResponse> getVideoTranscription(@PathVariable("videoId") String videoId) {
         return videoService.getVideoTranscription(videoId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{videoId}/transcript")
+    public ResponseEntity<FullVideoTranscriptResponse> getFullTranscript(
+            @PathVariable("videoId") String videoId) {
+        return transcriptAssemblyService.assembleTranscript(videoId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

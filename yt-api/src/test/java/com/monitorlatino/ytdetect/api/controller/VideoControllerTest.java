@@ -45,6 +45,9 @@ class VideoControllerTest {
     @MockitoBean
     private YoutubeVideoService videoService;
 
+    @MockitoBean
+    private com.monitorlatino.ytdetect.api.service.VideoTranscriptAssemblyService transcriptAssemblyService;
+
     @Test
     @DisplayName("Should return 401 when X-API-Key is missing")
     void shouldReturn401WhenApiKeyMissing() throws Exception {
@@ -166,5 +169,27 @@ class VideoControllerTest {
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.chunks[0].chunkIndex").value(0))
                 .andExpect(jsonPath("$.chunks[0].transcriptionStatus").value("COMPLETED"));
+    }
+
+    @Test
+    @DisplayName("Should return 200 and assembled transcript for video")
+    void shouldReturnAssembledTranscript() throws Exception {
+        com.monitorlatino.ytdetect.api.dto.FullVideoTranscriptResponse transcript = new com.monitorlatino.ytdetect.api.dto.FullVideoTranscriptResponse(
+                "vid_789",
+                "Video Title",
+                VideoStatus.COMPLETED,
+                2,
+                "Texto completo de prueba",
+                List.of(new com.monitorlatino.ytdetect.api.dto.TranscriptSegmentResponse(0.0, 5.0, "Texto completo"))
+        );
+
+        when(transcriptAssemblyService.assembleTranscript("vid_789")).thenReturn(Optional.of(transcript));
+
+        mockMvc.perform(get("/api/v1/youtube/videos/vid_789/transcript")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.videoId").value("vid_789"))
+                .andExpect(jsonPath("$.fullText").value("Texto completo de prueba"))
+                .andExpect(jsonPath("$.segments[0].text").value("Texto completo"));
     }
 }
