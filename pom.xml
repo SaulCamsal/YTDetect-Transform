@@ -21,6 +21,7 @@
     <modules>
         <module>yt-common</module>
         <module>yt-api</module>
+        <module>yt-worker</module>
     </modules>
 
     <properties>
