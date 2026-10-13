@@ -35,6 +35,9 @@ public class YoutubeChannel {
     @Column(name = "station_id")
     private Integer stationId;
 
+    @Column(name = "s3_folder", length = 255)
+    private String s3Folder;
+
     @Column(name = "timezone", nullable = false, length = 64)
     private String timezone = "America/Mexico_City";
 
@@ -119,6 +122,14 @@ public class YoutubeChannel {
 
     public void setStationId(Integer stationId) {
         this.stationId = stationId;
+    }
+
+    public String getS3Folder() {
+        return s3Folder;
+    }
+
+    public void setS3Folder(String s3Folder) {
+        this.s3Folder = s3Folder;
     }
 
     public String getTimezone() {

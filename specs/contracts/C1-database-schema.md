@@ -9,7 +9,8 @@ Las siguientes tablas están creadas manualmente, por lo que las entidades JPA d
 - `channel_id` (VARCHAR(100) NOT NULL UNIQUE)
 - `channel_name` (NVARCHAR(255) NULL)
 - `uploads_playlist_id` (VARCHAR(100) NULL)
-- `station_id` (INT NULL) - ID mapeado hacia el sistema externo
+- `station_id` (INT NULL) - ID mapeado hacia el sistema externo (stream_id en vw_Station_Spots)
+- `s3_folder` (VARCHAR(255) NULL) - Carpeta de S3 de la estación (Folder en stationfolders, ej. /CHART/YT/MILENIO)
 - `timezone` (VARCHAR(64) NOT NULL)
 - `language_code` (VARCHAR(20) NOT NULL)
 - `enabled` (BIT NOT NULL)

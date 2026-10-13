@@ -35,7 +35,10 @@ Canales de YouTube (Videos / Directos / Shorts)
                                                                 (Desduplicación en SQL Server)
                                                                             │
                                                                             ▼
-                                                            Cola AWS SQS: youtube-download-queue
+                                                            youtube.youtube_video
+                                                            (status = QUEUED_DOWNLOAD)
+                                                                            │
+                                                       (Polling periódico cada 30 segundos)
                                                                             │
                                                                             ▼
                                                             DownloadJobListener (yt-worker)
@@ -48,14 +51,15 @@ Canales de YouTube (Videos / Directos / Shorts)
                                                                                                        │
                                                                                                        ▼
                                                                                            S3AudioUploadService
-                                                                                         (Subida de chunks a S3)
+                                                                                         (Subida a S3: monitorlatino/
+                                                                                  {Folder}/YYYYMMDD/YYYYMMDD_HHMMSS.mp3)
                                                                                                        │
                                                                                                        ▼
-                                                                                            TranscriptionApiClient
-                                                                                       (POST /api/v1/transcriptions)
+                                                                                          AudioArrivalQueueService
+                                                                                     (Notifica a SQS: audio-arrivals)
                                                                                                        │
                                                                                                        ▼
-                                                                                            Whisper GPU Workers
+                                                                                        Pipeline / Workers de Whisper
                                                                                                        │
                                                                                                        ▼
                                            TranscriptionSyncService (yt-api) <─────────── API de Whisper
@@ -82,12 +86,12 @@ Este proyecto implementa íntegramente lo requerido en [`plan_desarrollo_youtube
 | **Fase 2: Catálogo de Canales** | Sincronización automática de suscripciones de YouTube con OAuth 2.0 y administración CRUD REST. | [`YoutubeApiClient`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/client/YoutubeApiClient.java), [`YoutubeChannelService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/YoutubeChannelService.java), [`ChannelController`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/controller/ChannelController.java) | `yt-api` |
 | **Fase 3: Detección Push (WebSub)** | Notificaciones push de subidas de videos vía PubSubHubbub con validación de firmas HMAC-SHA1/SHA256 y parseo Atom. | [`WebSubCallbackController`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/websub/WebSubCallbackController.java), [`HmacSignatureValidator`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/websub/HmacSignatureValidator.java), [`AtomFeedParser`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/websub/AtomFeedParser.java) | `yt-api` |
 | **Fase 3: Polling de Respaldo** | Scheduler distribuido (ShedLock) cada 30 min para escanear playlists de uploads (`UU...`) y watcher de directos. | [`YoutubePollingService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/YoutubePollingService.java), [`LiveStreamWatcher`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/LiveStreamWatcher.java) | `yt-api` |
-| **Fase 3: Desduplicación y Encolado** | Verificación de `video_id`, validación de duración máxima (10 horas) y publicación en cola de descarga. | [`VideoDiscoveryService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/VideoDiscoveryService.java), [`YoutubeDownloadQueueService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/YoutubeDownloadQueueService.java) | `yt-api` |
-| **Fase 4: Cola SQS** | Formato estandarizado del mensaje de descarga y cola de trabajo asíncrona independiente. | [`DownloadJobMessage`](file:///yt-common/src/main/java/com/monitorlatino/ytdetect/common/dto/DownloadJobMessage.java) (`youtube-download-queue`) | `yt-common` |
+| **Fase 3: Desduplicación y Encolado** | Verificación de `video_id`, validación de duración máxima (10 horas) y registro en BD (`QUEUED_DOWNLOAD`). | [`VideoDiscoveryService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/VideoDiscoveryService.java), [`YoutubeDownloadQueueService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/YoutubeDownloadQueueService.java) | `yt-api` |
+| **Fase 4: Despacho a Worker** | Despacho asíncrono y distribuido mediante sondeo periódico de trabajos pendientes en base de datos. | [`DownloadJobListener`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/listener/DownloadJobListener.java) (`@Scheduled` en `youtube_video`) | `yt-worker` |
 | **Fase 5: Extracción de Audio** | Descarga únicamente del flujo de audio (`-f bestaudio -x --audio-format mp3`) con aislamiento de procesos. | [`AudioProcessingService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioProcessingService.java), [`CliProcessRunner`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/cli/CliProcessRunner.java) (`yt-dlp`) | `yt-worker` |
-| **Fase 5: Normalización y Fragmentación** | Conversión a Mono, 16 kHz, 64 kbps MP3 y división en fragmentos de 5 minutos (300 s) con reset de timestamps. | [`AudioProcessingService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioProcessingService.java) (`ffmpeg -segment_time 300`) | `yt-worker` |
-| **Fase 6: Almacenamiento en S3** | Subida de chunks con convención: `youtube/{channelId}/{year}/{month}/{videoId}/chunk_{index}.mp3`. | [`S3AudioUploadService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/S3AudioUploadService.java) (`S3Template`) | `yt-worker` |
-| **Fase 7: Despacho a Whisper** | Envío de cada chunk listo (`POST /api/v1/transcriptions`) a la API de transcripción y guardado de `jobId`. | [`TranscriptionApiClient`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/client/TranscriptionApiClient.java), [`DownloadJobListener`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/listener/DownloadJobListener.java) | `yt-worker` |
+| **Fase 5: Normalización y Fragmentación** | Conversión a Mono, 16 kHz, 64 kbps MP3 y división en fragmentos de 5 minutos (300 s) con formato de fecha radio. | [`AudioProcessingService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioProcessingService.java) (`ffmpeg -segment_time 300`) | `yt-worker` |
+| **Fase 6: Almacenamiento en S3** | Subida al bucket `monitorlatino` bajo subcarpeta por estación y fecha: `{Folder}/{YYYYMMDD}/{YYYYMMDD_HHMMSS}.mp3`. | [`S3AudioUploadService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/S3AudioUploadService.java) (`S3Template`) | `yt-worker` |
+| **Fase 7: Notificación a audio-arrivals** | Publicación de mensaje JSON en la cola SQS existente `audio-arrivals` para ingesta automática en transcripción. | [`AudioArrivalQueueService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioArrivalQueueService.java), [`AudioArrivalMessage`](file:///yt-common/src/main/java/com/monitorlatino/ytdetect/common/dto/AudioArrivalMessage.java) | `yt-worker` |
 | **Fase 8: Sincronización Whisper** | Sondeo periódico del estado de cada chunk (`COMPLETED`/`FAILED`), actualización y cambio de estado del video. | [`TranscriptionSyncService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/TranscriptionSyncService.java), [`TranscriptionClient`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/client/TranscriptionClient.java) | `yt-api` |
 | **Fase 8: Ensamblado y Timestamps** | Alineación temporal de segmentos de audio a la línea global del video (`chunk.offset + segment.start`) y texto final. | [`VideoTranscriptAssemblyService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/VideoTranscriptAssemblyService.java), [`VideoController`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/controller/VideoController.java) | `yt-api` |
 | **Fase 9: Resiliencia y Retries** | Manejo de errores de descarga/procesamiento, contador de intentos (`attempt_count`), estados `FAILED` y limpieza de temporales. | [`DownloadJobListener`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/listener/DownloadJobListener.java) | `yt-worker` |
@@ -105,6 +109,9 @@ YTDetect-Transform/
 ├── db/                                   # Scripts DDL para SQL Server
 │   ├── 00_create_schema.sql              # Creación del esquema 'youtube'
 │   ├── V1__youtube_schema.sql            # Tablas e índices del contrato C1
+│   ├── alter_youtube_channel_add_s3_folder.sql # Agrega columna s3_folder a youtube_channel
+│   ├── seed_youtube_channels.sql         # Registro de los 8 canales iniciales vinculados a S3
+│   ├── update_reporting_stream_owner.sql # Actualización de stream_owner en BD Reporting
 │   └── permissions.sql                   # Concesión de permisos para usuarios de BD
 ├── specs/                                # Especificaciones y Contratos SDD
 │   ├── 00-constitution.md               # Reglas maestras del proyecto
@@ -115,19 +122,19 @@ YTDetect-Transform/
 │   └── src/main/java/.../common/
 │       ├── domain/entity/                # YoutubeChannel, YoutubeVideo, YoutubeAudioChunk
 │       ├── domain/repository/            # Spring Data JPA Repositories
-│       └── dto/                          # DownloadJobMessage, DTOs de dominio
+│       └── dto/                          # AudioArrivalMessage, DownloadJobMessage, DTOs
 ├── yt-api/                               # Módulo ejecutable: API REST y Detección
 │   └── src/main/java/.../api/
 │       ├── client/                       # YoutubeApiClient, TranscriptionClient
 │       ├── controller/                   # ChannelController, VideoController
 │       ├── service/                      # VideoDiscoveryService, YoutubePollingService, etc.
 │       └── websub/                       # WebSubCallbackController, AtomFeedParser
-└── yt-worker/                            # Módulo ejecutable: Consumidor SQS y Descarga
+└── yt-worker/                            # Módulo ejecutable: Descarga, S3 y Cola de Audios
     └── src/main/java/.../worker/
         ├── cli/                          # CliProcessRunner (yt-dlp y ffmpeg)
         ├── client/                       # TranscriptionApiClient (Whisper)
-        ├── listener/                     # DownloadJobListener (@SqsListener)
-        └── service/                      # AudioProcessingService, S3AudioUploadService
+        ├── listener/                     # DownloadJobListener (@Scheduled polling en BD)
+        └── service/                      # AudioProcessingService, S3AudioUploadService, AudioArrivalQueueService
 ```
 
 ---
@@ -185,7 +192,10 @@ Edita `.env` con tus credenciales (ver detalles en la sección siguiente).
 Ejecuta los scripts ubicados en la carpeta `db/` en tu servidor SQL Server (en la base de datos configurada, por ejemplo `MonitorTranscription`):
 1. `db/00_create_schema.sql` (Crea el esquema `youtube`).
 2. `db/V1__youtube_schema.sql` (Crea las tablas `youtube_channel`, `youtube_video`, `youtube_audio_chunk`, `shedlock` e índices).
-3. `db/permissions.sql` (Otorga permisos de lectura/escritura al usuario de aplicación).
+3. `db/alter_youtube_channel_add_s3_folder.sql` (Agrega la columna `s3_folder` en `youtube.youtube_channel`).
+4. `db/seed_youtube_channels.sql` (Inserta o actualiza los 8 canales iniciales de YouTube con sus `station_id`, `s3_folder` y playlists `UU...`).
+5. `db/update_reporting_stream_owner.sql` (*Opcional/Administración*: Ejecutar en la base de datos `Reporting` para registrar la URL del canal en `stream_owner`).
+6. `db/permissions.sql` (Otorga permisos de lectura/escritura al usuario de aplicación).
 
 ### 4. Compilar y verificar el proyecto
 Ejecuta la suite de pruebas unitarias y de integración para validar la correcta configuración:
@@ -213,21 +223,21 @@ El archivo `.env` controla los secretos y parámetros de conexión:
 
 ```env
 # ===================================================================
-# 1. Base de Datos SQL Server
+# 1. Base de Datos SQL Server (MonitorTranscription)
 # ===================================================================
-SPRING_DATASOURCE_URL=jdbc:sqlserver://tu-servidor-rds.amazonaws.com:1433;databaseName=MonitorTranscription;encrypt=false;trustServerCertificate=false;
-SPRING_DATASOURCE_USERNAME=tu_usuario
-SPRING_DATASOURCE_PASSWORD=tu_contraseña
+SPRING_DATASOURCE_URL=jdbc:sqlserver://localhost:1433;databaseName=MonitorTranscription;encrypt=true;trustServerCertificate=true
+SPRING_DATASOURCE_USERNAME=sa
+SPRING_DATASOURCE_PASSWORD=TuPasswordAqui
 
 # ===================================================================
-# 2. Seguridad interna (Cabecera X-API-Key en endpoints REST)
+# 2. Seguridad interna (Cabecera X-API-Key en endpoints REST de yt-api)
 # ===================================================================
 YT_API_KEY=default-secret-key
 
 # ===================================================================
 # 3. Google YouTube Data API v3
 # ===================================================================
-# API Key pública para consultar videos, canales y playlists
+# Clave publica requerida para resolucion de canales y polling de playlists
 YOUTUBE_API_KEY=AIzaSyTuClaveDeGoogleCloud...
 
 # Credenciales OAuth 2.0 (Opcionales: solo requeridas para sincronizar suscripciones personales de tu cuenta)
@@ -236,75 +246,114 @@ YOUTUBE_CLIENT_SECRET=
 YOUTUBE_REFRESH_TOKEN=
 
 # ===================================================================
-# 4. WebSub (PubSubHubbub para notificaciones push)
+# 4. WebSub (PubSubHubbub para notificaciones push en tiempo real)
 # ===================================================================
-# URL pública accesible por Google (en local se usa ngrok o cloudflared)
+# URL publica accesible por Google (en local se usa ngrok o cloudflared)
 YT_WEBSUB_CALLBACK_URL=https://tu-dominio-o-ngrok.com/api/v1/youtube/websub/callback
 YT_WEBSUB_SECRET=ytdetect-websub-secret
 
 # ===================================================================
-# 5. AWS SQS y S3
+# 5. AWS Credenciales, SQS y S3 (Region us-west-2 Oregon)
 # ===================================================================
-YT_SQS_DOWNLOAD_QUEUE=youtube-download-queue
-YT_S3_BUCKET=monitor-youtube-audio
-YT_S3_PREFIX=youtube
-AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
+AWS_REGION=us-west-2
+
+# Cola SQS existente en AWS donde el worker notifica los audios fragmentados
+YT_SQS_AUDIO_ARRIVALS_QUEUE=audio-arrivals
+
+# Bucket S3 existente de produccion y prefijo base
+YT_S3_BUCKET=monitorlatino
+YT_S3_PREFIX=CHARTS
 
 # ===================================================================
 # 6. API Externa de Whisper (Transcripción)
 # ===================================================================
 EXTERNAL_TRANSCRIPTION_URL=https://transcript.monitorlatino.com/api/v1
 EXTERNAL_TRANSCRIPTION_API_KEY=tu-api-key-de-transcripcion
+
+# ===================================================================
+# 7. Rutas opcionales de CLI / Worker (si no estan en el PATH del sistema)
+# ===================================================================
+# YT_DLP_PATH=yt-dlp
+# FFMPEG_PATH=ffmpeg
+# YT_WORKER_POLL_DELAY=30000
 ```
 
 ---
 
 ## Ejecución en Entorno Local
 
-Puedes ejecutar los dos componentes del sistema de forma independiente:
+Puedes ejecutar los dos componentes del sistema de forma independiente utilizando Maven Wrapper o mediante los artefactos `.jar` generados:
 
-### 1. Iniciar la API REST y Detector (`yt-api`)
+### Método A: Ejecución Directa con Maven Wrapper (Recomendado para desarrollo)
 
-El módulo `yt-api` gestiona los endpoints REST, el webhook de WebSub, el polling de respaldo y la sincronización con Whisper.
+Abre dos terminales (una para `yt-api` y otra para `yt-worker`):
 
-**En Windows PowerShell:**
+**Terminal 1 — Iniciar la API REST y Detector (`yt-api`):**
 ```powershell
-# Cargar variables del .env en la sesión
-Get-Content .env | ForEach-Object {
-    if ($_ -match '^\s*([^#=]+)=(.*)$') {
-        [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), "Process")
-    }
-}
-
-# Ejecutar el jar indicando el puerto deseado
-java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8082
+# Windows PowerShell
+.\mvnw.cmd spring-boot:run -pl yt-api
 ```
-
-**En Linux / macOS:**
 ```bash
-export $(grep -v '^#' .env | xargs)
-java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8082
+# Linux / macOS
+./mvnw spring-boot:run -pl yt-api
 ```
+*`yt-api` se iniciará por defecto en el puerto `8080` (o el configurado en `application.yml`).*
 
-La API estará lista en `http://localhost:8082`.
+**Terminal 2 — Iniciar el Trabajador de Descargas (`yt-worker`):**
+```powershell
+# Windows PowerShell
+.\mvnw.cmd spring-boot:run -pl yt-worker
+```
+```bash
+# Linux / macOS
+./mvnw spring-boot:run -pl yt-worker
+```
+*`yt-worker` se iniciará en el puerto `8081` y ejecutará periódicamente el sondeo de videos en estado `QUEUED_DOWNLOAD`.*
 
 ---
 
-### 2. Iniciar el Trabajador de Descargas (`yt-worker`)
+### Método B: Ejecución con Artefactos `.jar` Empaquetados
 
-El módulo `yt-worker` escucha mensajes de la cola SQS, descarga con `yt-dlp`, procesa con `ffmpeg`, sube los fragmentos a Amazon S3 y notifica a Whisper.
+Si prefieres empaquetar y ejecutar los archivos compilados:
 
-```powershell
-# Windows PowerShell
-java -jar yt-worker/target/yt-worker-0.0.1-SNAPSHOT.jar --server.port=8081
-```
+1. **Compilar el proyecto:**
+   ```powershell
+   .\mvnw.cmd package -DskipTests
+   ```
 
-```bash
-# Linux / macOS
-java -jar yt-worker/target/yt-worker-0.0.1-SNAPSHOT.jar --server.port=8081
-```
+2. **Cargar variables de `.env` y ejecutar `yt-api`:**
+   ```powershell
+   # Windows PowerShell
+   Get-Content .env | ForEach-Object {
+       if ($_ -match '^\s*([^#=]+)=(.*)$') {
+           [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), "Process")
+       }
+   }
+   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8080
+   ```
+   ```bash
+   # Linux / macOS
+   export $(grep -v '^#' .env | xargs)
+   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8080
+   ```
+
+3. **Cargar variables de `.env` y ejecutar `yt-worker`:**
+   ```powershell
+   # Windows PowerShell
+   Get-Content .env | ForEach-Object {
+       if ($_ -match '^\s*([^#=]+)=(.*)$') {
+           [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), "Process")
+       }
+   }
+   java -jar yt-worker/target/yt-worker-0.0.1-SNAPSHOT.jar --server.port=8081
+   ```
+   ```bash
+   # Linux / macOS
+   export $(grep -v '^#' .env | xargs)
+   java -jar yt-worker/target/yt-worker-0.0.1-SNAPSHOT.jar --server.port=8081
+   ```
 
 ---
 
@@ -408,27 +457,27 @@ curl -X GET http://localhost:8082/api/v1/youtube/videos/lTQHImoeuEY/transcript \
 ## Flujo Operativo de Detección y Procesamiento
 
 ```text
-1. DETECCIÓN
-   - WebSub recibe notificación instantánea O el Polling consulta la playlist cada 30 min.
-   - VideoDiscoveryService valida que el video no exista en SQL Server.
+1. DETECCIÓN (yt-api)
+   - WebSub recibe notificación push en tiempo real O el Polling consulta la playlist cada 30 min.
+   - VideoDiscoveryService valida que el video no exista previamente en SQL Server.
    - Si la duración excede 10 horas, se marca SKIPPED.
    - Si es válido, se inserta en youtube.youtube_video con estado QUEUED_DOWNLOAD.
-   - Se publica el mensaje DownloadJobMessage en youtube-download-queue (SQS).
 
 2. DESCARGA Y SEGMENTACIÓN (yt-worker)
-   - DownloadJobListener recibe el trabajo y pasa el estado a DOWNLOADING.
-   - yt-dlp descarga exclusivamente el stream de audio en un directorio temporal aislado.
+   - DownloadJobListener sondea periódicamente (cada 30 s) videos con estado QUEUED_DOWNLOAD.
+   - Al tomar un video, transiciona su estado a DOWNLOADING.
+   - yt-dlp descarga exclusivamente el flujo de audio en un directorio temporal aislado.
    - ffmpeg recodifica a 16 kHz Mono 64kbps MP3 y lo divide en chunks de máximo 300 segundos.
 
-3. SUBIDA A S3 Y DESPACHO
-   - Cada chunk se sube a S3 con la clave: youtube/{channelId}/{year}/{month}/{videoId}/chunk_{index}.mp3.
-   - Se persiste el fragmento en youtube.youtube_audio_chunk.
-   - Se envía la petición HTTP a la API existente de Whisper (POST /api/v1/transcriptions).
-   - Se actualiza el video a TRANSCRIBING y se borran los archivos temporales de disco.
+3. SUBIDA A S3 Y NOTIFICACIÓN A COLA (yt-worker)
+   - Cada chunk se sube a S3 con convención: s3://monitorlatino/{Folder}/{YYYYMMDD}/{YYYYMMDD_HHMMSS}.mp3.
+   - Se persiste cada fragmento en youtube.youtube_audio_chunk.
+   - AudioArrivalQueueService publica un mensaje JSON en la cola SQS 'audio-arrivals' con stationId, audioUrl y fecha local.
+   - Se actualiza el video a TRANSCRIBING y se eliminan los archivos temporales de disco.
 
 4. SINCRONIZACIÓN Y ENSAMBLADO FINAL (yt-api)
-   - TranscriptionSyncService consulta periódicamente el estado de cada trabajo en Whisper.
+   - TranscriptionSyncService consulta periódicamente el estado de cada fragmento en Whisper.
    - Al completarse todos los fragmentos, el video pasa a COMPLETED.
-   - VideoTranscriptAssemblyService suma los offsets (chunk_index * 300s) a cada segmento para
+   - VideoTranscriptAssemblyService suma los offsets temporales continuos de cada segmento para
      ofrecer la transcripción global sincronizada con la línea de tiempo de YouTube.
 ```

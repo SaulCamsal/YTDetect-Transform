@@ -21,11 +21,12 @@ spring:
 
 yt:
   sqs:
-    download-queue: ${YT_SQS_DOWNLOAD_QUEUE:youtube-download-queue}
+    audio-arrivals-queue: ${YT_SQS_AUDIO_ARRIVALS_QUEUE:audio-arrivals}
   s3:
-    bucket: ${YT_S3_BUCKET:monitor-youtube-audio}
-    prefix: ${YT_S3_PREFIX:youtube}
+    bucket: ${YT_S3_BUCKET:monitorlatino}
+    prefix: ${YT_S3_PREFIX:CHARTS}
   worker:
+    poll-delay: ${YT_WORKER_POLL_DELAY:30000}
     temp-dir: ${YT_WORKER_TEMP_DIR:}
     yt-dlp-path: ${YT_DLP_PATH:yt-dlp}
     ffmpeg-path: ${FFMPEG_PATH:ffmpeg}

@@ -12,6 +12,7 @@ import com.monitorlatino.ytdetect.common.domain.repository.YoutubeVideoRepositor
 import com.monitorlatino.ytdetect.common.dto.DownloadJobMessage;
 import com.monitorlatino.ytdetect.worker.client.TranscriptionApiClient;
 import com.monitorlatino.ytdetect.worker.client.TranscriptionJobResponse;
+import com.monitorlatino.ytdetect.worker.service.AudioArrivalQueueService;
 import com.monitorlatino.ytdetect.worker.service.AudioProcessingException;
 import com.monitorlatino.ytdetect.worker.service.AudioProcessingService;
 import com.monitorlatino.ytdetect.worker.service.S3AudioUploadService;
@@ -37,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -54,6 +56,8 @@ class DownloadJobListenerTest {
     @Mock
     private S3AudioUploadService s3AudioUploadService;
     @Mock
+    private AudioArrivalQueueService audioArrivalQueueService;
+    @Mock
     private TranscriptionApiClient transcriptionApiClient;
 
     private Clock fixedClock;
@@ -67,6 +71,7 @@ class DownloadJobListenerTest {
                 chunkRepository,
                 audioProcessingService,
                 s3AudioUploadService,
+                audioArrivalQueueService,
                 transcriptionApiClient,
                 fixedClock,
                 null,
@@ -93,13 +98,11 @@ class DownloadJobListenerTest {
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
         when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1, chunk2));
         when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
-        when(s3AudioUploadService.getDefaultBucket()).thenReturn("monitor-youtube-audio");
-        when(s3AudioUploadService.getDefaultPrefix()).thenReturn("youtube");
-        when(s3AudioUploadService.buildS3Key(any(), any(), any(), anyInt())).thenReturn("youtube/UC_123/2026/10/vid_abc/chunk_0.mp3");
-        when(s3AudioUploadService.uploadChunk(any(), any(), any())).thenReturn("s3://monitor-youtube-audio/chunk.mp3");
+        when(s3AudioUploadService.getDefaultBucket()).thenReturn("monitorlatino");
+        when(s3AudioUploadService.getDefaultPrefix()).thenReturn("CHARTS");
+        when(s3AudioUploadService.buildS3Key(any(), any(), any(), any())).thenReturn("CHART/YT/MILENIO/20261006/20261006_040000.mp3");
+        when(s3AudioUploadService.uploadChunk(any(), any(), any())).thenReturn("s3://monitorlatino/CHART/YT/MILENIO/20261006/20261006_040000.mp3");
 
-        UUID jobId = UUID.randomUUID();
-        when(transcriptionApiClient.submitTranscription(any())).thenReturn(new TranscriptionJobResponse(jobId, false));
         when(chunkRepository.findByVideoVideoIdAndChunkIndex(anyString(), anyInt())).thenReturn(Optional.empty());
         when(chunkRepository.save(any(YoutubeAudioChunk.class))).thenAnswer(i -> i.getArgument(0));
 
@@ -109,8 +112,11 @@ class DownloadJobListenerTest {
         assertEquals(VideoStatus.TRANSCRIBING, video.getStatus());
         assertEquals(2, video.getChunkCount());
         verify(chunkRepository, times(2)).save(any(YoutubeAudioChunk.class));
-        verify(transcriptionApiClient, times(2)).submitTranscription(any());
+        verify(audioArrivalQueueService, times(2)).sendAudioArrival(any());
         verify(videoRepository, times(3)).save(video);
+        // publishedAt 10:00Z -> 04:00 America/Mexico_City; second chunk +300s
+        verify(s3AudioUploadService).buildS3Key(isNull(), eq("UC_123"), eq("vid_abc"), eq(java.time.LocalDateTime.of(2026, 10, 6, 4, 0, 0)));
+        verify(s3AudioUploadService).buildS3Key(isNull(), eq("UC_123"), eq("vid_abc"), eq(java.time.LocalDateTime.of(2026, 10, 6, 4, 5, 0)));
     }
 
     @Test
@@ -128,9 +134,9 @@ class DownloadJobListenerTest {
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
         when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1));
         when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
-        when(s3AudioUploadService.getDefaultBucket()).thenReturn("monitor-youtube-audio");
-        when(s3AudioUploadService.getDefaultPrefix()).thenReturn("youtube");
-        when(s3AudioUploadService.buildS3Key(any(), any(), any(), anyInt())).thenReturn("youtube/key.mp3");
+        when(s3AudioUploadService.getDefaultBucket()).thenReturn("monitorlatino");
+        when(s3AudioUploadService.getDefaultPrefix()).thenReturn("CHARTS");
+        when(s3AudioUploadService.buildS3Key(any(), any(), any(), any())).thenReturn("youtube/key.mp3");
         when(s3AudioUploadService.uploadChunk(any(), any(), any())).thenReturn("s3://bucket/key.mp3");
         when(chunkRepository.save(any(YoutubeAudioChunk.class))).thenAnswer(i -> i.getArgument(0));
 
@@ -138,6 +144,7 @@ class DownloadJobListenerTest {
         listener.onDownloadJob(message);
 
         assertEquals(VideoStatus.AUDIO_READY, video.getStatus());
+        verify(audioArrivalQueueService, never()).sendAudioArrival(any());
         verify(transcriptionApiClient, never()).submitTranscription(any());
     }
 
@@ -159,5 +166,15 @@ class DownloadJobListenerTest {
         assertEquals(VideoStatus.FAILED, video.getStatus());
         assertEquals("YT_DLP_DOWNLOAD_ERROR", video.getLastErrorCode());
         assertEquals(3, video.getAttemptCount());
+    }
+
+    @Test
+    @DisplayName("Should poll pending downloads from repository")
+    void shouldPollPendingDownloadsFromRepository() {
+        when(videoRepository.findByStatus(VideoStatus.QUEUED_DOWNLOAD)).thenReturn(List.of());
+
+        listener.pollAndProcessPendingDownloads();
+
+        verify(videoRepository).findByStatus(VideoStatus.QUEUED_DOWNLOAD);
     }
 }

@@ -7,14 +7,16 @@ import com.monitorlatino.ytdetect.common.domain.enums.TranscriptionStatus;
 import com.monitorlatino.ytdetect.common.domain.enums.VideoStatus;
 import com.monitorlatino.ytdetect.common.domain.repository.YoutubeAudioChunkRepository;
 import com.monitorlatino.ytdetect.common.domain.repository.YoutubeVideoRepository;
+import com.monitorlatino.ytdetect.common.dto.AudioArrivalMessage;
 import com.monitorlatino.ytdetect.common.dto.DownloadJobMessage;
 import com.monitorlatino.ytdetect.worker.client.TranscriptionApiClient;
 import com.monitorlatino.ytdetect.worker.client.TranscriptionJobRequest;
 import com.monitorlatino.ytdetect.worker.client.TranscriptionJobResponse;
+import com.monitorlatino.ytdetect.worker.service.AudioArrivalQueueService;
 import com.monitorlatino.ytdetect.worker.service.AudioProcessingException;
 import com.monitorlatino.ytdetect.worker.service.AudioProcessingService;
 import com.monitorlatino.ytdetect.worker.service.S3AudioUploadService;
-import io.awspring.cloud.sqs.annotation.SqsListener;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +32,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Component
 public class DownloadJobListener {
@@ -40,6 +43,7 @@ public class DownloadJobListener {
     private final YoutubeAudioChunkRepository chunkRepository;
     private final AudioProcessingService audioProcessingService;
     private final S3AudioUploadService s3AudioUploadService;
+    private final AudioArrivalQueueService audioArrivalQueueService;
     private final TranscriptionApiClient transcriptionApiClient;
     private final Clock clock;
     private final String tempDirBasePath;
@@ -50,6 +54,7 @@ public class DownloadJobListener {
             YoutubeAudioChunkRepository chunkRepository,
             AudioProcessingService audioProcessingService,
             S3AudioUploadService s3AudioUploadService,
+            AudioArrivalQueueService audioArrivalQueueService,
             TranscriptionApiClient transcriptionApiClient,
             Clock clock,
             @Value("${yt.worker.temp-dir:}") String tempDirBasePath,
@@ -58,13 +63,32 @@ public class DownloadJobListener {
         this.chunkRepository = chunkRepository;
         this.audioProcessingService = audioProcessingService;
         this.s3AudioUploadService = s3AudioUploadService;
+        this.audioArrivalQueueService = audioArrivalQueueService;
         this.transcriptionApiClient = transcriptionApiClient;
         this.clock = clock;
         this.tempDirBasePath = tempDirBasePath;
         this.maxAttempts = maxAttempts;
     }
 
-    @SqsListener("${yt.sqs.download-queue:youtube-download-queue}")
+    @Scheduled(fixedDelayString = "${yt.worker.poll-delay:30000}", initialDelay = 5000)
+    public void pollAndProcessPendingDownloads() {
+        List<YoutubeVideo> pendingVideos = videoRepository.findByStatus(VideoStatus.QUEUED_DOWNLOAD);
+        if (pendingVideos.isEmpty()) {
+            return;
+        }
+
+        log.info("Found {} videos with status QUEUED_DOWNLOAD, starting download processing", pendingVideos.size());
+        for (YoutubeVideo video : pendingVideos) {
+            String youtubeUrl = "https://www.youtube.com/watch?v=" + video.getVideoId();
+            String channelId = (video.getChannel() != null) ? video.getChannel().getChannelId() : "";
+            try {
+                onDownloadJob(new DownloadJobMessage(video.getVideoId(), channelId, youtubeUrl));
+            } catch (Exception e) {
+                log.error("Failed processing queued video {}: {}", video.getVideoId(), e.getMessage());
+            }
+        }
+    }
+
     public void onDownloadJob(DownloadJobMessage message) {
         log.info("Received download job for video: {} (channel: {})", message.videoId(), message.channelId());
 
@@ -117,7 +141,7 @@ public class DownloadJobListener {
                 ? video.getVirtualStart()
                 : (video.getPublishedAt() != null
                 ? LocalDateTime.ofInstant(video.getPublishedAt(), zoneId)
-                : LocalDateTime.now(clock));
+                : LocalDateTime.now(clock.withZone(zoneId)));
 
         int chunkDurationSec = audioProcessingService.getChunkDurationSeconds();
         String targetBucket = s3AudioUploadService.getDefaultBucket();
@@ -126,34 +150,39 @@ public class DownloadJobListener {
         for (int i = 0; i < chunkFiles.size(); i++) {
             final int chunkIndex = i;
             File chunkFile = chunkFiles.get(chunkIndex);
-            String s3Key = s3AudioUploadService.buildS3Key(channel.getChannelId(), video.getVideoId(), video.getPublishedAt(), chunkIndex);
-            String s3AudioUrl = s3AudioUploadService.uploadChunk(targetBucket, s3Key, chunkFile);
-
             BigDecimal offsetSec = BigDecimal.valueOf((long) chunkIndex * chunkDurationSec);
             LocalDateTime chunkAiredAt = baseAiredAt.plusSeconds((long) chunkIndex * chunkDurationSec);
+
+            String s3Key = s3AudioUploadService.buildS3Key(channel.getS3Folder(), channel.getChannelId(), video.getVideoId(), chunkAiredAt);
+            String s3AudioUrl = s3AudioUploadService.uploadChunk(targetBucket, s3Key, chunkFile);
 
             YoutubeAudioChunk chunk = chunkRepository.findByVideoVideoIdAndChunkIndex(video.getVideoId(), chunkIndex)
                     .orElseGet(() -> new YoutubeAudioChunk(video, chunkIndex, offsetSec, chunkAiredAt, s3Key));
 
+            chunk.setS3Key(s3Key);
             chunk.setDurationSeconds(BigDecimal.valueOf(chunkDurationSec));
             chunk.setTranscriptionStatus(TranscriptionStatus.QUEUED);
 
             if (channel.getStationId() != null) {
+                UUID jobId = UUID.randomUUID();
+                String fileName = s3Key.substring(s3Key.lastIndexOf('/') + 1);
+                AudioArrivalMessage arrivalMessage = AudioArrivalMessage.of(
+                        jobId,
+                        channel.getStationId(),
+                        s3AudioUrl,
+                        fileName,
+                        chunkAiredAt.toString(),
+                        channel.getTimezone(),
+                        channel.getLanguageCode()
+                );
+
                 try {
-                    TranscriptionJobRequest request = TranscriptionJobRequest.of(
-                            channel.getStationId(),
-                            s3AudioUrl,
-                            channel.getTimezone(),
-                            channel.getLanguageCode()
-                    );
-                    TranscriptionJobResponse response = transcriptionApiClient.submitTranscription(request);
-                    if (response != null && response.jobId() != null) {
-                        chunk.setTranscriptionJobId(response.jobId());
-                    }
+                    audioArrivalQueueService.sendAudioArrival(arrivalMessage);
+                    chunk.setTranscriptionJobId(jobId);
                 } catch (Exception ex) {
-                    log.error("Failed to submit chunk {} of video {} to transcription API: {}",
-                            i, video.getVideoId(), ex.getMessage(), ex);
-                    chunk.setErrorCode("TRANSCRIPTION_API_ERROR");
+                    log.error("Failed to send chunk {} of video {} to audio-arrivals queue: {}",
+                            chunkIndex, video.getVideoId(), ex.getMessage(), ex);
+                    chunk.setErrorCode("SQS_DISPATCH_ERROR");
                     chunk.setErrorMessage(ex.getMessage());
                 }
             } else {
