@@ -17,17 +17,24 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import com.monitorlatino.ytdetect.api.service.ReportingStationSyncService;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/youtube/channels")
 public class ChannelController {
 
     private final YoutubeChannelService channelService;
+    private final ReportingStationSyncService reportingStationSyncService;
 
-    public ChannelController(YoutubeChannelService channelService) {
+    public ChannelController(
+            YoutubeChannelService channelService,
+            ReportingStationSyncService reportingStationSyncService) {
         this.channelService = channelService;
+        this.reportingStationSyncService = reportingStationSyncService;
     }
 
     @PostMapping
@@ -63,5 +70,15 @@ public class ChannelController {
     public ResponseEntity<SyncResultResponse> triggerSync() {
         SyncResultResponse response = channelService.triggerSync();
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/sync-reporting")
+    public ResponseEntity<Map<String, Object>> syncReportingStations() {
+        int count = reportingStationSyncService.syncReportingStations();
+        return ResponseEntity.ok(Map.of(
+                "status", "SUCCESS",
+                "syncedCount", count,
+                "message", "Successfully synchronized " + count + " channels from Reporting database."
+        ));
     }
 }

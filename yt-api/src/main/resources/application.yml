@@ -37,6 +37,10 @@ yt:
   live-watcher:
     delay: 600000
     enabled: true
+  reporting-sync:
+    enabled: ${YT_REPORTING_SYNC_ENABLED:true}
+    cron: ${YT_REPORTING_SYNC_CRON:0 0 4 * * *}
+    query: ${YT_REPORTING_SYNC_QUERY:SELECT si.stream_id, si.stream_desc, si.stream_owner, f.Folder FROM Reporting.dbo.vw_Station_Spots si INNER JOIN Reporting.dbo.stationfolders f ON f.stream_id = si.stream_id WHERE si.id_country = 27 AND si.stream_owner IS NOT NULL AND si.stream_owner LIKE '%youtube%'}
   websub:
     hub-url: "https://pubsubhubbub.appspot.com/"
     callback-url: ${YT_WEBSUB_CALLBACK_URL:https://example.com/api/v1/youtube/websub/callback}

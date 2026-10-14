@@ -111,6 +111,7 @@ YTDetect-Transform/
 │   ├── alter_youtube_channel_add_s3_folder.sql # Agrega columna s3_folder a youtube_channel
 │   ├── seed_youtube_channels.sql         # Registro de los 8 canales iniciales vinculados a S3
 │   ├── update_reporting_stream_owner.sql # Actualización de stream_owner en BD Reporting
+│   ├── create_view_reporting_stations.sql # Vista opcional cruzada a Reporting
 │   └── permissions.sql                   # Concesión de permisos para usuarios de BD
 ├── specs/                                # Especificaciones y Contratos SDD
 │   ├── 00-constitution.md               # Reglas maestras del proyecto
@@ -126,7 +127,7 @@ YTDetect-Transform/
 │   └── src/main/java/.../api/
 │       ├── client/                       # YoutubeApiClient, TranscriptionClient
 │       ├── controller/                   # ChannelController, VideoController
-│       ├── service/                      # VideoDiscoveryService, YoutubePollingService, etc.
+│       ├── service/                      # VideoDiscoveryService, ReportingStationSyncService, etc.
 │       └── websub/                       # WebSubCallbackController, AtomFeedParser
 └── yt-worker/                            # Módulo ejecutable: Descarga, S3 y Cola de Audios
     └── src/main/java/.../worker/
@@ -397,6 +398,14 @@ curl -X PATCH http://localhost:8082/api/v1/youtube/channels/1 \
 curl -X POST http://localhost:8082/api/v1/youtube/channels/sync \
   -H "X-API-Key: default-secret-key"
 ```
+
+#### E. Sincronizar estaciones desde la Base de Datos de Reporting
+Escanea la base de datos `Reporting` en la misma instancia de SQL Server (`id_country = 27` y `stream_owner LIKE '%youtube%'`), resuelve su handle/canal y los registra automáticamente en `MonitorTranscription`:
+```bash
+curl -X POST http://localhost:8080/api/v1/youtube/channels/sync-reporting \
+  -H "X-API-Key: default-secret-key"
+```
+*(Nota: Este sincronizador también se ejecuta automáticamente cada 24 horas a las 04:00 AM UTC mediante un job programado `@Scheduled`).*
 
 ---
 

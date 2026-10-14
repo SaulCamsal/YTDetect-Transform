@@ -79,6 +79,31 @@ public class YoutubeApiClient {
         return list.getFirst();
     }
 
+    public DiscoveredChannelInfo fetchChannelByHandle(String handle) throws IOException {
+        String cleanHandle = handle.startsWith("@") ? handle : "@" + handle;
+        YouTube.Channels.List request = youTube.channels()
+                .list(List.of("snippet", "contentDetails"))
+                .setForHandle(cleanHandle);
+
+        if (youtubeConfig.getApiKey() != null && !youtubeConfig.getApiKey().isBlank()) {
+            request.setKey(youtubeConfig.getApiKey());
+        }
+
+        ChannelListResponse response = request.execute();
+        if (response.getItems() != null && !response.getItems().isEmpty()) {
+            Channel channel = response.getItems().getFirst();
+            String id = channel.getId();
+            String title = (channel.getSnippet() != null) ? channel.getSnippet().getTitle() : cleanHandle;
+            String uploadsPlaylistId = null;
+            if (channel.getContentDetails() != null &&
+                    channel.getContentDetails().getRelatedPlaylists() != null) {
+                uploadsPlaylistId = channel.getContentDetails().getRelatedPlaylists().getUploads();
+            }
+            return new DiscoveredChannelInfo(id, title, uploadsPlaylistId);
+        }
+        return null;
+    }
+
     private List<DiscoveredChannelInfo> enrichChannelsWithUploadPlaylist(List<String> channelIds, Map<String, String> titles) throws IOException {
         List<DiscoveredChannelInfo> result = new ArrayList<>();
 

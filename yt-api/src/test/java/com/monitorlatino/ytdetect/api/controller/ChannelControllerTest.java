@@ -42,6 +42,9 @@ class ChannelControllerTest {
     @MockitoBean
     private YoutubeChannelService channelService;
 
+    @MockitoBean
+    private com.monitorlatino.ytdetect.api.service.ReportingStationSyncService reportingStationSyncService;
+
     @Test
     @DisplayName("Should return 401 when X-API-Key is missing")
     void shouldReturn401WhenApiKeyMissing() throws Exception {
@@ -170,5 +173,17 @@ class ChannelControllerTest {
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.discoveredCount").value(10))
                 .andExpect(jsonPath("$.newlyAddedCount").value(2));
+    }
+
+    @Test
+    @DisplayName("Should trigger reporting sync and return 200 OK with synced count")
+    void shouldTriggerReportingSync() throws Exception {
+        when(reportingStationSyncService.syncReportingStations()).thenReturn(3);
+
+        mockMvc.perform(post("/api/v1/youtube/channels/sync-reporting")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.syncedCount").value(3));
     }
 }
