@@ -90,6 +90,9 @@ public class ReportingStationSyncService {
     private boolean processStation(int streamId, String streamDesc, String streamOwner, String folder) {
         String sanitizedFolder = (folder != null && !folder.isBlank()) ? folder.trim() : null;
 
+        // Keep transcription.station_config in sync so Whisper/AWS automatically processes uploaded audio chunks
+        upsertTranscriptionStationConfig(streamId, streamDesc, sanitizedFolder);
+
         // Check if stationId is already registered in youtube.youtube_channel
         Optional<YoutubeChannel> existingByStation = channelRepository.findOne(
                 (root, query, cb) -> cb.equal(root.get("stationId"), streamId)
@@ -160,6 +163,39 @@ public class ReportingStationSyncService {
 
         channelRepository.save(channelToSave);
         return true;
+    }
+
+    void upsertTranscriptionStationConfig(int stationId, String streamDesc, String folder) {
+        if (folder == null || folder.isBlank()) {
+            return;
+        }
+        String cleanFolder = folder.trim().replaceAll("^/+", "").replaceAll("/+$", "");
+        String s3Prefix = cleanFolder + "/";
+        String stationName = (streamDesc != null && !streamDesc.isBlank())
+                ? streamDesc.trim()
+                : cleanFolder.substring(cleanFolder.lastIndexOf('/') + 1);
+
+        String sql = """
+                MERGE transcription.station_config AS target
+                USING (VALUES (?, ?, ?, CAST(NULL AS VARCHAR(50)), 1, 1, 5, 0, CAST(NULL AS VARCHAR(255))))
+                    AS src (station_id, s3_prefix, station_name, timezone, enabled, process_weekends, priority, run_ai, notes)
+                ON target.station_id = src.station_id
+                WHEN MATCHED THEN
+                    UPDATE SET
+                        s3_prefix = src.s3_prefix,
+                        station_name = src.station_name,
+                        updated_at = GETUTCDATE()
+                WHEN NOT MATCHED THEN
+                    INSERT (station_id, s3_prefix, station_name, timezone, enabled, process_weekends, priority, run_ai, notes, created_at, updated_at)
+                    VALUES (src.station_id, src.s3_prefix, src.station_name, src.timezone, src.enabled, src.process_weekends, src.priority, src.run_ai, src.notes, GETUTCDATE(), GETUTCDATE());
+                """;
+
+        try {
+            jdbcTemplate.update(sql, stationId, s3Prefix, stationName);
+            log.info("Synchronized transcription.station_config for station {}: prefix={}, name={}", stationId, s3Prefix, stationName);
+        } catch (Exception ex) {
+            log.warn("Could not upsert transcription.station_config for station {}: {}", stationId, ex.getMessage());
+        }
     }
 
     private DiscoveredChannelInfo resolveChannelInfo(ParsedOwner parsed, String fallbackTitle) {

@@ -119,6 +119,13 @@ class ReportingStationSyncServiceTest {
         assertEquals("/CHART/YT/MILENIO", saved.getS3Folder());
         assertEquals("UUfxHplbcoJK9m70c4VyTIxg", saved.getUploadsPlaylistId());
         assertTrue(saved.isEnabled());
+
+        verify(jdbcTemplate).update(
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(6321),
+                org.mockito.ArgumentMatchers.eq("CHART/YT/MILENIO/"),
+                org.mockito.ArgumentMatchers.eq("milenio")
+        );
     }
 
     @Test
@@ -149,5 +156,17 @@ class ReportingStationSyncServiceTest {
         assertEquals("/CHART/YT/GRUPOFORMULA-RF_NEW", existing.getS3Folder());
         verify(channelRepository).save(existing);
         verify(youtubeApiClient, never()).fetchChannelByHandle(anyString());
+    }
+
+    @Test
+    @DisplayName("Should upsert into transcription.station_config with trailing slash and clean prefix")
+    void shouldUpsertTranscriptionStationConfig() {
+        syncService.upsertTranscriptionStationConfig(6325, "GrupoAnimalTV", "/CHART/YT/GRUPOANIMALTV/");
+        verify(jdbcTemplate).update(
+                anyString(),
+                org.mockito.ArgumentMatchers.eq(6325),
+                org.mockito.ArgumentMatchers.eq("CHART/YT/GRUPOANIMALTV/"),
+                org.mockito.ArgumentMatchers.eq("GrupoAnimalTV")
+        );
     }
 }
