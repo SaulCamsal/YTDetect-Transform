@@ -111,7 +111,6 @@ YTDetect-Transform/
 │   ├── alter_youtube_channel_add_s3_folder.sql # Agrega columna s3_folder a youtube_channel
 │   ├── seed_youtube_channels.sql         # Registro de los 8 canales iniciales vinculados a S3
 │   ├── update_reporting_stream_owner.sql # Actualización de stream_owner en BD Reporting
-│   ├── create_view_reporting_stations.sql # Vista opcional cruzada a Reporting
 │   └── permissions.sql                   # Concesión de permisos para usuarios de BD
 ├── specs/                                # Especificaciones y Contratos SDD
 │   ├── 00-constitution.md               # Reglas maestras del proyecto
