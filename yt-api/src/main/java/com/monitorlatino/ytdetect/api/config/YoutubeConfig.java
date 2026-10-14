@@ -60,7 +60,11 @@ public class YoutubeConfig {
                     .setApplicationName(applicationName)
                     .build();
         } else {
-            log.info("Configuring YouTube client without OAuth2 (fallback). API key configured: {}", (apiKey != null && !apiKey.isBlank()));
+            boolean hasKey = (apiKey != null && !apiKey.isBlank());
+            log.info("Configuring YouTube client without OAuth2 (fallback). API key configured: {}", hasKey);
+            if (!hasKey) {
+                log.warn("ATENCIÓN / WARNING: YOUTUBE_API_KEY no está configurada o está vacía. Las llamadas a YouTube Data API v3 serán rechazadas con '403 Forbidden (Method doesn't allow unregistered callers)'. Por favor configura YOUTUBE_API_KEY en tu .env o variables de entorno.");
+            }
             return new YouTube.Builder(httpTransport, jsonFactory, httpRequest -> {
             })
                     .setApplicationName(applicationName)
