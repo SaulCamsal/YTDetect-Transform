@@ -43,7 +43,7 @@ public class DownloadJobListener {
     private final YoutubeAudioChunkRepository chunkRepository;
     private final AudioProcessingService audioProcessingService;
     private final S3AudioUploadService s3AudioUploadService;
-    private final AudioArrivalQueueService audioArrivalQueueService;
+    private final Optional<AudioArrivalQueueService> audioArrivalQueueService;
     private final TranscriptionApiClient transcriptionApiClient;
     private final Clock clock;
     private final String tempDirBasePath;
@@ -54,7 +54,7 @@ public class DownloadJobListener {
             YoutubeAudioChunkRepository chunkRepository,
             AudioProcessingService audioProcessingService,
             S3AudioUploadService s3AudioUploadService,
-            AudioArrivalQueueService audioArrivalQueueService,
+            Optional<AudioArrivalQueueService> audioArrivalQueueService,
             TranscriptionApiClient transcriptionApiClient,
             Clock clock,
             @Value("${yt.worker.temp-dir:}") String tempDirBasePath,
@@ -63,7 +63,7 @@ public class DownloadJobListener {
         this.chunkRepository = chunkRepository;
         this.audioProcessingService = audioProcessingService;
         this.s3AudioUploadService = s3AudioUploadService;
-        this.audioArrivalQueueService = audioArrivalQueueService;
+        this.audioArrivalQueueService = audioArrivalQueueService != null ? audioArrivalQueueService : Optional.empty();
         this.transcriptionApiClient = transcriptionApiClient;
         this.clock = clock;
         this.tempDirBasePath = tempDirBasePath;
@@ -163,7 +163,7 @@ public class DownloadJobListener {
             chunk.setDurationSeconds(BigDecimal.valueOf(chunkDurationSec));
             chunk.setTranscriptionStatus(TranscriptionStatus.QUEUED);
 
-            if (channel.getStationId() != null) {
+            if (audioArrivalQueueService.isPresent() && channel.getStationId() != null) {
                 UUID jobId = UUID.randomUUID();
                 String fileName = s3Key.substring(s3Key.lastIndexOf('/') + 1);
                 AudioArrivalMessage arrivalMessage = AudioArrivalMessage.of(
@@ -177,7 +177,7 @@ public class DownloadJobListener {
                 );
 
                 try {
-                    audioArrivalQueueService.sendAudioArrival(arrivalMessage);
+                    audioArrivalQueueService.get().sendAudioArrival(arrivalMessage);
                     chunk.setTranscriptionJobId(jobId);
                 } catch (Exception ex) {
                     log.error("Failed to send chunk {} of video {} to audio-arrivals queue: {}",
@@ -185,8 +185,11 @@ public class DownloadJobListener {
                     chunk.setErrorCode("SQS_DISPATCH_ERROR");
                     chunk.setErrorMessage(ex.getMessage());
                 }
+            } else if (channel.getStationId() != null) {
+                log.info("Audio chunk {} of video {} uploaded to S3: {}. S3 automatic event notification handles transcription queue.",
+                        chunkIndex, video.getVideoId(), s3AudioUrl);
             } else {
-                log.info("Channel {} has no stationId configured, audio uploaded but skipping transcription dispatch", channel.getChannelId());
+                log.info("Channel {} has no stationId configured, audio uploaded to S3: {}", channel.getChannelId(), s3AudioUrl);
             }
 
             chunkRepository.save(chunk);

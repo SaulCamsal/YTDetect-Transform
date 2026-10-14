@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: yt-worker
+  cloud:
+    aws:
+      sqs:
+        enabled: ${YT_SQS_ENABLED:false}
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:sqlserver://localhost:1433;databaseName=MonitorTranscription;encrypt=true;trustServerCertificate=true}
     username: ${SPRING_DATASOURCE_USERNAME:yt_app}
@@ -21,6 +25,7 @@ spring:
 
 yt:
   sqs:
+    enabled: ${YT_SQS_ENABLED:false}
     audio-arrivals-queue: ${YT_SQS_AUDIO_ARRIVALS_QUEUE:audio-arrivals}
   s3:
     bucket: ${YT_S3_BUCKET:monitorlatino}

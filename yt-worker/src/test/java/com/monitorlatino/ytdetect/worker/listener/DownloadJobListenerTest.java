@@ -71,7 +71,7 @@ class DownloadJobListenerTest {
                 chunkRepository,
                 audioProcessingService,
                 s3AudioUploadService,
-                audioArrivalQueueService,
+                Optional.of(audioArrivalQueueService),
                 transcriptionApiClient,
                 fixedClock,
                 null,
@@ -117,6 +117,51 @@ class DownloadJobListenerTest {
         // publishedAt 10:00Z -> 04:00 America/Mexico_City; second chunk +300s
         verify(s3AudioUploadService).buildS3Key(isNull(), eq("UC_123"), eq("vid_abc"), eq(java.time.LocalDateTime.of(2026, 10, 6, 4, 0, 0)));
         verify(s3AudioUploadService).buildS3Key(isNull(), eq("UC_123"), eq("vid_abc"), eq(java.time.LocalDateTime.of(2026, 10, 6, 4, 5, 0)));
+    }
+
+    @Test
+    @DisplayName("Should process and upload to S3 without SQS dispatch when SQS service is absent")
+    void shouldProcessAndUploadToS3WithoutSqsDispatch(@TempDir File tempDir) throws Exception {
+        DownloadJobListener noSqsListener = new DownloadJobListener(
+                videoRepository,
+                chunkRepository,
+                audioProcessingService,
+                s3AudioUploadService,
+                Optional.empty(),
+                transcriptionApiClient,
+                fixedClock,
+                null,
+                3
+        );
+
+        YoutubeChannel channel = new YoutubeChannel("UC_456", "Test Channel", ChannelOrigin.SUBSCRIPTION);
+        channel.setStationId(106);
+        channel.setTimezone("America/Mexico_City");
+
+        YoutubeVideo video = new YoutubeVideo("vid_nosqs", channel, "Test Video", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
+        video.setPublishedAt(Instant.parse("2026-10-06T10:00:00Z"));
+
+        File mockRawAudio = new File(tempDir, "full_audio.mp3");
+        File chunk1 = new File(tempDir, "chunk_0000.mp3");
+
+        when(videoRepository.findByVideoId("vid_nosqs")).thenReturn(Optional.of(video));
+        when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
+        when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1));
+        when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
+        when(s3AudioUploadService.getDefaultBucket()).thenReturn("monitorlatino");
+        when(s3AudioUploadService.getDefaultPrefix()).thenReturn("CHARTS");
+        when(s3AudioUploadService.buildS3Key(any(), any(), any(), any())).thenReturn("CHART/YT/MILENIO/20261006/20261006_040000.mp3");
+        when(s3AudioUploadService.uploadChunk(any(), any(), any())).thenReturn("s3://monitorlatino/CHART/YT/MILENIO/20261006/20261006_040000.mp3");
+        when(chunkRepository.findByVideoVideoIdAndChunkIndex(anyString(), anyInt())).thenReturn(Optional.empty());
+        when(chunkRepository.save(any(YoutubeAudioChunk.class))).thenAnswer(i -> i.getArgument(0));
+
+        DownloadJobMessage message = new DownloadJobMessage("vid_nosqs", "UC_456", "https://youtube.com/watch?v=vid_nosqs");
+        noSqsListener.onDownloadJob(message);
+
+        assertEquals(VideoStatus.TRANSCRIBING, video.getStatus());
+        assertEquals(1, video.getChunkCount());
+        verify(chunkRepository, times(1)).save(any(YoutubeAudioChunk.class));
+        verify(audioArrivalQueueService, never()).sendAudioArrival(any());
     }
 
     @Test

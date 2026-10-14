@@ -55,8 +55,7 @@ Canales de YouTube (Videos / Directos / Shorts)
                                                                                   {Folder}/YYYYMMDD/YYYYMMDD_HHMMSS.mp3)
                                                                                                        │
                                                                                                        ▼
-                                                                                          AudioArrivalQueueService
-                                                                                     (Notifica a SQS: audio-arrivals)
+                                                                           (Evento automatico S3 ObjectCreated)
                                                                                                        │
                                                                                                        ▼
                                                                                         Pipeline / Workers de Whisper
@@ -91,7 +90,7 @@ Este proyecto implementa íntegramente lo requerido en [`plan_desarrollo_youtube
 | **Fase 5: Extracción de Audio** | Descarga únicamente del flujo de audio (`-f bestaudio -x --audio-format mp3`) con aislamiento de procesos. | [`AudioProcessingService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioProcessingService.java), [`CliProcessRunner`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/cli/CliProcessRunner.java) (`yt-dlp`) | `yt-worker` |
 | **Fase 5: Normalización y Fragmentación** | Conversión a Mono, 16 kHz, 64 kbps MP3 y división en fragmentos de 5 minutos (300 s) con formato de fecha radio. | [`AudioProcessingService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioProcessingService.java) (`ffmpeg -segment_time 300`) | `yt-worker` |
 | **Fase 6: Almacenamiento en S3** | Subida al bucket `monitorlatino` bajo subcarpeta por estación y fecha: `{Folder}/{YYYYMMDD}/{YYYYMMDD_HHMMSS}.mp3`. | [`S3AudioUploadService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/S3AudioUploadService.java) (`S3Template`) | `yt-worker` |
-| **Fase 7: Notificación a audio-arrivals** | Publicación de mensaje JSON en la cola SQS existente `audio-arrivals` para ingesta automática en transcripción. | [`AudioArrivalQueueService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/AudioArrivalQueueService.java), [`AudioArrivalMessage`](file:///yt-common/src/main/java/com/monitorlatino/ytdetect/common/dto/AudioArrivalMessage.java) | `yt-worker` |
+| **Fase 7: Ingesta en Transcripción** | Notificación automática nativa de S3 al depositar el audio en la carpeta correspondiente hacia Whisper. | Evento nativo de S3 / [`S3AudioUploadService`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/service/S3AudioUploadService.java) | `yt-worker` |
 | **Fase 8: Sincronización Whisper** | Sondeo periódico del estado de cada chunk (`COMPLETED`/`FAILED`), actualización y cambio de estado del video. | [`TranscriptionSyncService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/TranscriptionSyncService.java), [`TranscriptionClient`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/client/TranscriptionClient.java) | `yt-api` |
 | **Fase 8: Ensamblado y Timestamps** | Alineación temporal de segmentos de audio a la línea global del video (`chunk.offset + segment.start`) y texto final. | [`VideoTranscriptAssemblyService`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/service/VideoTranscriptAssemblyService.java), [`VideoController`](file:///yt-api/src/main/java/com/monitorlatino/ytdetect/api/controller/VideoController.java) | `yt-api` |
 | **Fase 9: Resiliencia y Retries** | Manejo de errores de descarga/procesamiento, contador de intentos (`attempt_count`), estados `FAILED` y limpieza de temporales. | [`DownloadJobListener`](file:///yt-worker/src/main/java/com/monitorlatino/ytdetect/worker/listener/DownloadJobListener.java) | `yt-worker` |
@@ -259,12 +258,13 @@ AWS_ACCESS_KEY_ID=
 AWS_SECRET_ACCESS_KEY=
 AWS_REGION=us-west-2
 
-# Cola SQS existente en AWS donde el worker notifica los audios fragmentados
-YT_SQS_AUDIO_ARRIVALS_QUEUE=audio-arrivals
-
 # Bucket S3 existente de produccion y prefijo base
+# (El bucket ya cuenta con eventos automaticos que notifican a Whisper al subir los chunks)
 YT_S3_BUCKET=monitorlatino
 YT_S3_PREFIX=CHARTS
+
+# (Opcional) Forzar envio manual a SQS desde la app (por defecto desactivado: false)
+# YT_SQS_ENABLED=false
 
 # ===================================================================
 # 6. API Externa de Whisper (Transcripción)
@@ -469,10 +469,10 @@ curl -X GET http://localhost:8082/api/v1/youtube/videos/lTQHImoeuEY/transcript \
    - yt-dlp descarga exclusivamente el flujo de audio en un directorio temporal aislado.
    - ffmpeg recodifica a 16 kHz Mono 64kbps MP3 y lo divide en chunks de máximo 300 segundos.
 
-3. SUBIDA A S3 Y NOTIFICACIÓN A COLA (yt-worker)
+3. SUBIDA A S3 Y DESPACHO AUTOMÁTICO (yt-worker)
    - Cada chunk se sube a S3 con convención: s3://monitorlatino/{Folder}/{YYYYMMDD}/{YYYYMMDD_HHMMSS}.mp3.
    - Se persiste cada fragmento en youtube.youtube_audio_chunk.
-   - AudioArrivalQueueService publica un mensaje JSON en la cola SQS 'audio-arrivals' con stationId, audioUrl y fecha local.
+   - S3 notifica automáticamente a la cola de transcripción mediante eventos nativos de AWS (S3 Event Notification).
    - Se actualiza el video a TRANSCRIBING y se eliminan los archivos temporales de disco.
 
 4. SINCRONIZACIÓN Y ENSAMBLADO FINAL (yt-api)
