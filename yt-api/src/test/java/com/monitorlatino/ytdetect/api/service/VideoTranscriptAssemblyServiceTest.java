@@ -27,8 +27,14 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import com.monitorlatino.ytdetect.common.domain.entity.YoutubeSubtitleTranscript;
+import com.monitorlatino.ytdetect.common.domain.repository.YoutubeSubtitleTranscriptRepository;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.zip.GZIPOutputStream;
 
 @ExtendWith(MockitoExtension.class)
 class VideoTranscriptAssemblyServiceTest {
@@ -38,13 +44,19 @@ class VideoTranscriptAssemblyServiceTest {
     @Mock
     private YoutubeAudioChunkRepository chunkRepository;
     @Mock
+    private YoutubeSubtitleTranscriptRepository subtitleTranscriptRepository;
+    @Mock
     private TranscriptionClient transcriptionClient;
 
     private VideoTranscriptAssemblyService service;
 
     @BeforeEach
     void setUp() {
-        service = new VideoTranscriptAssemblyService(videoRepository, chunkRepository, transcriptionClient);
+        service = new VideoTranscriptAssemblyService(
+                videoRepository,
+                chunkRepository,
+                subtitleTranscriptRepository,
+                transcriptionClient);
     }
 
     @Test
@@ -94,5 +106,44 @@ class VideoTranscriptAssemblyServiceTest {
         assertEquals(300.0, transcript.segments().get(1).start());
         assertEquals(306.0, transcript.segments().get(1).end());
         assertEquals("World", transcript.segments().get(1).text());
+    }
+
+    @Test
+    @DisplayName("Should assemble transcript from subtitle fast-path chunks when audio chunks are empty")
+    void shouldAssembleFromSubtitleTranscriptsWhenNoAudioChunksExist() throws IOException {
+        YoutubeChannel channel = new YoutubeChannel("UC_TEST", "Test Channel", ChannelOrigin.SUBSCRIPTION);
+        YoutubeVideo video = new YoutubeVideo("vid_sub", channel, "Sub Video", VideoStatus.COMPLETED, DiscoveredVia.WEBSUB);
+        video.setChunkCount(1);
+
+        when(videoRepository.findByVideoId("vid_sub")).thenReturn(Optional.of(video));
+        when(chunkRepository.findByVideoVideoIdOrderByChunkIndexAsc("vid_sub")).thenReturn(List.of());
+
+        String jsonSegments = "[{\"start\": 1.0, \"end\": 3.5, \"text\": \"Hola subtitulos\"}]";
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzos = new GZIPOutputStream(baos)) {
+            gzos.write(jsonSegments.getBytes());
+        }
+
+        YoutubeSubtitleTranscript subChunk = new YoutubeSubtitleTranscript();
+        subChunk.setVideo(video);
+        subChunk.setChunkIndex(0);
+        subChunk.setStartSeconds(BigDecimal.ZERO);
+        subChunk.setEndSeconds(BigDecimal.valueOf(300));
+        subChunk.setTranscriptText("Hola subtitulos");
+        subChunk.setSegmentsGz(baos.toByteArray());
+
+        when(subtitleTranscriptRepository.findByVideoVideoIdOrderByChunkIndexAsc("vid_sub")).thenReturn(List.of(subChunk));
+
+        Optional<FullVideoTranscriptResponse> resultOpt = service.assembleTranscript("vid_sub");
+
+        assertTrue(resultOpt.isPresent());
+        FullVideoTranscriptResponse transcript = resultOpt.get();
+
+        assertEquals("vid_sub", transcript.videoId());
+        assertEquals("Hola subtitulos", transcript.fullText());
+        assertEquals(1, transcript.segments().size());
+        assertEquals(1.0, transcript.segments().get(0).start());
+        assertEquals(3.5, transcript.segments().get(0).end());
+        assertEquals("Hola subtitulos", transcript.segments().get(0).text());
     }
 }

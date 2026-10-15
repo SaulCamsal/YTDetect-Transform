@@ -66,3 +66,27 @@ Tabla estándar para la librería ShedLock (manejo de ejecución concurrente de 
 - `lock_until` (DATETIME2(3) NOT NULL)
 - `locked_at` (DATETIME2(3) NOT NULL)
 - `locked_by` (VARCHAR(255) NOT NULL)
+
+### 5. Tabla `youtube.youtubeSubtitleTranscript`
+Almacena transcripciones obtenidas directamente desde los subtítulos de YouTube fragmentadas en bloques de 5 minutos, con formato idéntico a `transcription.transcription_result`.
+- `result_seq` (BIGINT IDENTITY PRIMARY KEY)
+- `id` (UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID())
+- `job_id` (UNIQUEIDENTIFIER NOT NULL)
+- `video_id` (VARCHAR(50) NOT NULL) -> FK a `youtube_video(video_id)`
+- `chunk_index` (INT NOT NULL)
+- `start_seconds` (DECIMAL(12,3) NOT NULL)
+- `end_seconds` (DECIMAL(12,3) NOT NULL)
+- `detected_language` (VARCHAR(20) NULL)
+- `language_probability` (DECIMAL(5,4) NULL)
+- `audio_duration_seconds` (DECIMAL(12,3) NULL)
+- `processing_seconds` (DECIMAL(12,3) NULL)
+- `realtime_factor` (DECIMAL(12,2) NULL)
+- `model_name` (VARCHAR(50) NULL)
+- `worker_host` (VARCHAR(255) NULL)
+- `transcript_text` (VARCHAR(MAX) NULL)
+- `segments_gz` (VARBINARY(MAX) NULL)
+- `segments_raw_bytes` (INT NULL)
+- `segment_count` (INT NULL)
+- `created_at` (DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME())
+- `UQ (video_id, chunk_index)`
+

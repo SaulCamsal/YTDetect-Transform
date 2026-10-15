@@ -32,6 +32,11 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import com.monitorlatino.ytdetect.common.domain.entity.YoutubeSubtitleTranscript;
+import com.monitorlatino.ytdetect.common.domain.repository.YoutubeSubtitleTranscriptRepository;
+import com.monitorlatino.ytdetect.worker.dto.SubtitleExtractionResult;
+import com.monitorlatino.ytdetect.worker.service.SubtitleChunkingService;
+import com.monitorlatino.ytdetect.worker.service.SubtitleExtractionService;
 import java.util.UUID;
 
 @Component
@@ -41,33 +46,45 @@ public class DownloadJobListener {
 
     private final YoutubeVideoRepository videoRepository;
     private final YoutubeAudioChunkRepository chunkRepository;
+    private final YoutubeSubtitleTranscriptRepository subtitleTranscriptRepository;
     private final AudioProcessingService audioProcessingService;
+    private final SubtitleExtractionService subtitleExtractionService;
+    private final SubtitleChunkingService subtitleChunkingService;
     private final S3AudioUploadService s3AudioUploadService;
     private final Optional<AudioArrivalQueueService> audioArrivalQueueService;
     private final TranscriptionApiClient transcriptionApiClient;
     private final Clock clock;
     private final String tempDirBasePath;
     private final int maxAttempts;
+    private final boolean fastPathEnabled;
 
     public DownloadJobListener(
             YoutubeVideoRepository videoRepository,
             YoutubeAudioChunkRepository chunkRepository,
+            YoutubeSubtitleTranscriptRepository subtitleTranscriptRepository,
             AudioProcessingService audioProcessingService,
+            SubtitleExtractionService subtitleExtractionService,
+            SubtitleChunkingService subtitleChunkingService,
             S3AudioUploadService s3AudioUploadService,
             Optional<AudioArrivalQueueService> audioArrivalQueueService,
             TranscriptionApiClient transcriptionApiClient,
             Clock clock,
             @Value("${yt.worker.temp-dir:}") String tempDirBasePath,
-            @Value("${yt.worker.max-attempts:3}") int maxAttempts) {
+            @Value("${yt.worker.max-attempts:3}") int maxAttempts,
+            @Value("${yt.worker.fast-path.enabled:true}") boolean fastPathEnabled) {
         this.videoRepository = videoRepository;
         this.chunkRepository = chunkRepository;
+        this.subtitleTranscriptRepository = subtitleTranscriptRepository;
         this.audioProcessingService = audioProcessingService;
+        this.subtitleExtractionService = subtitleExtractionService;
+        this.subtitleChunkingService = subtitleChunkingService;
         this.s3AudioUploadService = s3AudioUploadService;
         this.audioArrivalQueueService = audioArrivalQueueService != null ? audioArrivalQueueService : Optional.empty();
         this.transcriptionApiClient = transcriptionApiClient;
         this.clock = clock;
         this.tempDirBasePath = tempDirBasePath;
         this.maxAttempts = maxAttempts;
+        this.fastPathEnabled = fastPathEnabled;
     }
 
     @Scheduled(fixedDelayString = "${yt.worker.poll-delay:30000}", initialDelay = 5000)
@@ -127,6 +144,32 @@ public class DownloadJobListener {
         YoutubeChannel channel = detachedVideo.getChannel();
         detachedVideo.setStatus(VideoStatus.DOWNLOADING);
         YoutubeVideo video = videoRepository.save(detachedVideo);
+
+        // Fast-path: Check if video subtitles can be extracted directly without full audio download
+        if (fastPathEnabled) {
+            log.info("Checking subtitle fast-path for video {}", video.getVideoId());
+            Optional<SubtitleExtractionResult> subResultOpt = subtitleExtractionService.extractSubtitles(youtubeUrl, workDir);
+            if (subResultOpt.isPresent() && !subResultOpt.get().cues().isEmpty()) {
+                SubtitleExtractionResult subResult = subResultOpt.get();
+                log.info("Subtitle fast-path succeeded for video {}: {} cues found (lang: {}). Generating transcript chunks.",
+                        video.getVideoId(), subResult.cues().size(), subResult.language());
+
+                List<YoutubeSubtitleTranscript> transcripts = subtitleChunkingService.createChunks(
+                        video, subResult.cues(), subResult.language());
+
+                subtitleTranscriptRepository.saveAll(transcripts);
+
+                video.setChunkCount(transcripts.size());
+                video.setStatus(VideoStatus.COMPLETED);
+                video.setAttemptCount(video.getAttemptCount() + 1);
+                video = videoRepository.save(video);
+                log.info("Successfully completed video {} via subtitle fast-path with {} chunks",
+                        video.getVideoId(), transcripts.size());
+                return;
+            }
+            log.info("Subtitle fast-path not available for video {}. Proceeding with audio download pipeline.",
+                    video.getVideoId());
+        }
 
         // 1. Download audio via yt-dlp
         File rawAudio = audioProcessingService.downloadAudio(youtubeUrl, workDir, "full_audio.mp3");

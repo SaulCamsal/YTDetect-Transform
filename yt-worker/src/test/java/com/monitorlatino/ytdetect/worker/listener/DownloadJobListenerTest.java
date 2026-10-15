@@ -45,6 +45,13 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.monitorlatino.ytdetect.common.domain.entity.YoutubeSubtitleTranscript;
+import com.monitorlatino.ytdetect.common.domain.repository.YoutubeSubtitleTranscriptRepository;
+import com.monitorlatino.ytdetect.worker.dto.SubtitleCue;
+import com.monitorlatino.ytdetect.worker.dto.SubtitleExtractionResult;
+import com.monitorlatino.ytdetect.worker.service.SubtitleChunkingService;
+import com.monitorlatino.ytdetect.worker.service.SubtitleExtractionService;
+
 @ExtendWith(MockitoExtension.class)
 class DownloadJobListenerTest {
 
@@ -53,7 +60,13 @@ class DownloadJobListenerTest {
     @Mock
     private YoutubeAudioChunkRepository chunkRepository;
     @Mock
+    private YoutubeSubtitleTranscriptRepository subtitleTranscriptRepository;
+    @Mock
     private AudioProcessingService audioProcessingService;
+    @Mock
+    private SubtitleExtractionService subtitleExtractionService;
+    @Mock
+    private SubtitleChunkingService subtitleChunkingService;
     @Mock
     private S3AudioUploadService s3AudioUploadService;
     @Mock
@@ -70,13 +83,17 @@ class DownloadJobListenerTest {
         listener = new DownloadJobListener(
                 videoRepository,
                 chunkRepository,
+                subtitleTranscriptRepository,
                 audioProcessingService,
+                subtitleExtractionService,
+                subtitleChunkingService,
                 s3AudioUploadService,
                 Optional.of(audioArrivalQueueService),
                 transcriptionApiClient,
                 fixedClock,
                 null,
-                3
+                3,
+                true
         );
     }
 
@@ -127,13 +144,17 @@ class DownloadJobListenerTest {
         DownloadJobListener noSqsListener = new DownloadJobListener(
                 videoRepository,
                 chunkRepository,
+                subtitleTranscriptRepository,
                 audioProcessingService,
+                subtitleExtractionService,
+                subtitleChunkingService,
                 s3AudioUploadService,
                 Optional.empty(),
                 transcriptionApiClient,
                 fixedClock,
                 null,
-                3
+                3,
+                true
         );
 
         YoutubeChannel channel = new YoutubeChannel("UC_456", "Test Channel", ChannelOrigin.SUBSCRIPTION);
@@ -274,5 +295,35 @@ class DownloadJobListenerTest {
         listener.pollAndProcessPendingDownloads();
 
         verify(videoRepository).findByStatus(VideoStatus.QUEUED_DOWNLOAD);
+    }
+
+    @Test
+    @DisplayName("Should use subtitle fast-path when available and bypass audio download pipeline")
+    void shouldUseSubtitleFastPathWhenAvailable(@TempDir File tempDir) throws Exception {
+        YoutubeChannel channel = new YoutubeChannel("UC_FAST", "Fast Channel", ChannelOrigin.SUBSCRIPTION);
+        channel.setStationId(200);
+        YoutubeVideo video = new YoutubeVideo("vid_fast", channel, "Fast Video", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
+
+        when(videoRepository.findByVideoId("vid_fast")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
+
+        List<SubtitleCue> cues = List.of(new SubtitleCue(1.0, 5.0, "Texto de subtítulo"));
+        SubtitleExtractionResult extractionResult = new SubtitleExtractionResult("es", cues);
+        when(subtitleExtractionService.extractSubtitles(anyString(), any())).thenReturn(Optional.of(extractionResult));
+
+        YoutubeSubtitleTranscript mockTranscript = new YoutubeSubtitleTranscript();
+        mockTranscript.setChunkIndex(0);
+        when(subtitleChunkingService.createChunks(any(), eq(cues), eq("es"))).thenReturn(List.of(mockTranscript));
+
+        DownloadJobMessage message = new DownloadJobMessage("vid_fast", "UC_FAST", "https://youtube.com/watch?v=vid_fast");
+        listener.onDownloadJob(message);
+
+        assertEquals(VideoStatus.COMPLETED, video.getStatus());
+        assertEquals(1, video.getChunkCount());
+        verify(subtitleTranscriptRepository).saveAll(any());
+        verify(audioProcessingService, never()).downloadAudio(anyString(), any(), anyString());
+        verify(s3AudioUploadService, never()).uploadChunk(any(), any(), any());
+        verify(audioArrivalQueueService, never()).sendAudioArrival(any());
+        verify(transcriptionApiClient, never()).submitTranscription(any());
     }
 }
