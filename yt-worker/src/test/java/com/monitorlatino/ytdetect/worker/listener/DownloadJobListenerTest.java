@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -95,6 +96,7 @@ class DownloadJobListenerTest {
         File chunk2 = new File(tempDir, "chunk_0001.mp3");
 
         when(videoRepository.findByVideoId("vid_abc")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
         when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1, chunk2));
         when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
@@ -145,6 +147,7 @@ class DownloadJobListenerTest {
         File chunk1 = new File(tempDir, "chunk_0000.mp3");
 
         when(videoRepository.findByVideoId("vid_nosqs")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
         when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1));
         when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
@@ -176,6 +179,7 @@ class DownloadJobListenerTest {
         File chunk1 = new File(tempDir, "chunk_0000.mp3");
 
         when(videoRepository.findByVideoId("vid_no_stn")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(mockRawAudio);
         when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(chunk1));
         when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
@@ -201,6 +205,7 @@ class DownloadJobListenerTest {
         video.setAttemptCount(2); // Next failure is 3 >= maxAttempts
 
         when(videoRepository.findByVideoId("vid_err")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
         when(audioProcessingService.downloadAudio(anyString(), any(), anyString()))
                 .thenThrow(new AudioProcessingException("YT_DLP_DOWNLOAD_ERROR", "Private video"));
 
@@ -211,6 +216,54 @@ class DownloadJobListenerTest {
         assertEquals(VideoStatus.FAILED, video.getStatus());
         assertEquals("YT_DLP_DOWNLOAD_ERROR", video.getLastErrorCode());
         assertEquals(3, video.getAttemptCount());
+    }
+
+    @Test
+    @DisplayName("Should keep using the instance returned by save() to avoid stale @Version")
+    void shouldUseInstanceReturnedBySave(@TempDir File tempDir) throws Exception {
+        YoutubeChannel channel = new YoutubeChannel("UC_MERGE", "Channel", ChannelOrigin.SUBSCRIPTION);
+        channel.setStationId(107);
+        YoutubeVideo detached = new YoutubeVideo("vid_merge", channel, "Video", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
+        // Simulates JPA merge(): save() returns a different (managed) instance
+        YoutubeVideo merged = new YoutubeVideo("vid_merge", channel, "Video", VideoStatus.DOWNLOADING, DiscoveredVia.WEBSUB);
+
+        when(videoRepository.findByVideoId("vid_merge")).thenReturn(Optional.of(detached));
+        when(videoRepository.save(same(detached))).thenReturn(merged);
+        when(videoRepository.save(same(merged))).thenReturn(merged);
+        when(audioProcessingService.downloadAudio(anyString(), any(), anyString())).thenReturn(new File(tempDir, "full_audio.mp3"));
+        when(audioProcessingService.splitAndNormalizeAudio(any(), any())).thenReturn(List.of(new File(tempDir, "chunk_0000.mp3")));
+        when(audioProcessingService.getChunkDurationSeconds()).thenReturn(300);
+        when(s3AudioUploadService.buildS3Key(any(), any(), any(), any())).thenReturn("youtube/key.mp3");
+        when(s3AudioUploadService.uploadChunk(any(), any(), any())).thenReturn("s3://bucket/key.mp3");
+        when(chunkRepository.save(any(YoutubeAudioChunk.class))).thenAnswer(i -> i.getArgument(0));
+
+        listener.onDownloadJob(new DownloadJobMessage("vid_merge", "UC_MERGE", "https://youtube.com/watch?v=vid_merge"));
+
+        // YoutubeVideo.equals() compares videoId, so same() is needed to check identity
+        // Only the first save uses the detached instance; the rest use the returned one
+        verify(videoRepository, times(1)).save(same(detached));
+        verify(videoRepository, times(2)).save(same(merged));
+        assertEquals(VideoStatus.TRANSCRIBING, merged.getStatus());
+        assertEquals(1, merged.getChunkCount());
+    }
+
+    @Test
+    @DisplayName("Should re-queue video for retry when attempts remain")
+    void shouldRequeueVideoWhenAttemptsRemain() {
+        YoutubeChannel channel = new YoutubeChannel("UC_RETRY", "Channel", ChannelOrigin.SUBSCRIPTION);
+        YoutubeVideo video = new YoutubeVideo("vid_retry", channel, "Video", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
+
+        when(videoRepository.findByVideoId("vid_retry")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
+        when(audioProcessingService.downloadAudio(anyString(), any(), anyString()))
+                .thenThrow(new AudioProcessingException("YT_DLP_DOWNLOAD_ERROR", "Network error"));
+
+        assertThrows(RuntimeException.class,
+                () -> listener.onDownloadJob(new DownloadJobMessage("vid_retry", "UC_RETRY", "https://youtube.com/watch?v=vid_retry")));
+
+        assertEquals(VideoStatus.QUEUED_DOWNLOAD, video.getStatus());
+        assertEquals(1, video.getAttemptCount());
+        assertEquals("YT_DLP_DOWNLOAD_ERROR", video.getLastErrorCode());
     }
 
     @Test

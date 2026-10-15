@@ -120,9 +120,13 @@ public class DownloadJobListener {
     }
 
     @Transactional
-    public void processVideoJob(YoutubeVideo video, String youtubeUrl, File workDir) throws Exception {
-        video.setStatus(VideoStatus.DOWNLOADING);
-        videoRepository.save(video);
+    public void processVideoJob(YoutubeVideo detachedVideo, String youtubeUrl, File workDir) throws Exception {
+        // Called via self-invocation, so @Transactional is not applied: every save() runs in its own
+        // transaction and merges a detached entity. Always keep the instance returned by save(),
+        // which carries the incremented @Version; reusing the old one causes OptimisticLock errors.
+        YoutubeChannel channel = detachedVideo.getChannel();
+        detachedVideo.setStatus(VideoStatus.DOWNLOADING);
+        YoutubeVideo video = videoRepository.save(detachedVideo);
 
         // 1. Download audio via yt-dlp
         File rawAudio = audioProcessingService.downloadAudio(youtubeUrl, workDir, "full_audio.mp3");
@@ -132,10 +136,9 @@ public class DownloadJobListener {
         List<File> chunkFiles = audioProcessingService.splitAndNormalizeAudio(rawAudio, chunksDir);
         video.setChunkCount(chunkFiles.size());
         video.setStatus(VideoStatus.AUDIO_READY);
-        videoRepository.save(video);
+        video = videoRepository.save(video);
 
         // 3. Upload chunks to S3 and dispatch transcription
-        YoutubeChannel channel = video.getChannel();
         ZoneId zoneId = ZoneId.of(channel.getTimezone() != null ? channel.getTimezone() : "America/Mexico_City");
         LocalDateTime baseAiredAt = (video.getVirtualStart() != null)
                 ? video.getVirtualStart()
@@ -156,8 +159,11 @@ public class DownloadJobListener {
             String s3Key = s3AudioUploadService.buildS3Key(channel.getS3Folder(), channel.getChannelId(), video.getVideoId(), chunkAiredAt);
             String s3AudioUrl = s3AudioUploadService.uploadChunk(targetBucket, s3Key, chunkFile);
 
-            YoutubeAudioChunk chunk = chunkRepository.findByVideoVideoIdAndChunkIndex(video.getVideoId(), chunkIndex)
-                    .orElseGet(() -> new YoutubeAudioChunk(video, chunkIndex, offsetSec, chunkAiredAt, s3Key));
+            // No lambda here: 'video' is reassigned after each save(), so it is not effectively final
+            Optional<YoutubeAudioChunk> existingChunk = chunkRepository.findByVideoVideoIdAndChunkIndex(video.getVideoId(), chunkIndex);
+            YoutubeAudioChunk chunk = existingChunk.isPresent()
+                    ? existingChunk.get()
+                    : new YoutubeAudioChunk(video, chunkIndex, offsetSec, chunkAiredAt, s3Key);
 
             chunk.setS3Key(s3Key);
             chunk.setDurationSeconds(BigDecimal.valueOf(chunkDurationSec));
@@ -199,12 +205,15 @@ public class DownloadJobListener {
         video.setS3Prefix(targetPrefix);
         video.setStatus(channel.getStationId() != null ? VideoStatus.TRANSCRIBING : VideoStatus.AUDIO_READY);
         video.setAttemptCount(video.getAttemptCount() + 1);
-        videoRepository.save(video);
+        video = videoRepository.save(video);
         log.info("Successfully processed video {}. Status: {}", video.getVideoId(), video.getStatus());
     }
 
     @Transactional
-    public void handleFailure(YoutubeVideo video, Exception e) {
+    public void handleFailure(YoutubeVideo staleVideo, Exception e) {
+        // The caller's instance may hold an outdated @Version (processVideoJob already saved it),
+        // so reload the current row before updating it
+        YoutubeVideo video = videoRepository.findByVideoId(staleVideo.getVideoId()).orElse(staleVideo);
         video.setAttemptCount(video.getAttemptCount() + 1);
         if (e instanceof AudioProcessingException ape) {
             video.setLastErrorCode(ape.getErrorCode());
@@ -218,6 +227,10 @@ public class DownloadJobListener {
         if (video.getAttemptCount() >= maxAttempts) {
             video.setStatus(VideoStatus.FAILED);
             log.error("Video {} reached maximum attempts ({}), marked as FAILED", video.getVideoId(), maxAttempts);
+        } else {
+            // Re-queue for retry; otherwise it stays in DOWNLOADING/AUDIO_READY and the poller never picks it up again
+            video.setStatus(VideoStatus.QUEUED_DOWNLOAD);
+            log.warn("Video {} failed (attempt {}/{}), re-queued for retry", video.getVideoId(), video.getAttemptCount(), maxAttempts);
         }
 
         videoRepository.save(video);
