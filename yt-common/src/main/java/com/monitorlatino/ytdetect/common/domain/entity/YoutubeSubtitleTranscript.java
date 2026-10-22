@@ -19,7 +19,7 @@ import java.util.UUID;
 @Entity
 @Table(
         schema = "youtube",
-        name = "youtubeSubtitleTranscript",
+        name = "`youtubeSubtitleTranscript`",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uq_youtubeSubtitleTranscript_video_chunk", columnNames = {"video_id", "chunk_index"})
         }
