@@ -26,10 +26,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import com.monitorlatino.ytdetect.api.dto.RetryVideosResponse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -191,5 +193,48 @@ class VideoControllerTest {
                 .andExpect(jsonPath("$.videoId").value("vid_789"))
                 .andExpect(jsonPath("$.fullText").value("Texto completo de prueba"))
                 .andExpect(jsonPath("$.segments[0].text").value("Texto completo"));
+    }
+
+    @Test
+    @DisplayName("Should return 200 and retry count when retrying all failed videos")
+    void shouldRetryAllFailedVideos() throws Exception {
+        when(videoService.retryAllFailedVideos()).thenReturn(new RetryVideosResponse(2, List.of("vid_1", "vid_2")));
+
+        mockMvc.perform(post("/api/v1/youtube/videos/retry-failed")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.retriedCount").value(2))
+                .andExpect(jsonPath("$.videoIds[0]").value("vid_1"))
+                .andExpect(jsonPath("$.videoIds[1]").value("vid_2"));
+    }
+
+    @Test
+    @DisplayName("Should return 200 and updated video when retrying single video")
+    void shouldRetrySingleVideo() throws Exception {
+        VideoResponse response = new VideoResponse(
+                1L, "vid_1", "UC_CHAN", "Channel Name", "Title", "Desc",
+                Instant.now(), 120, LiveStatus.NONE, VideoStatus.QUEUED_DOWNLOAD,
+                DiscoveredVia.WEBSUB, null, null, null, null, 0, null, null,
+                Instant.now(), Instant.now()
+        );
+
+        when(videoService.retryVideo("vid_1")).thenReturn(Optional.of(response));
+
+        mockMvc.perform(post("/api/v1/youtube/videos/vid_1/retry")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.videoId").value("vid_1"))
+                .andExpect(jsonPath("$.status").value("QUEUED_DOWNLOAD"))
+                .andExpect(jsonPath("$.attemptCount").value(0));
+    }
+
+    @Test
+    @DisplayName("Should return 404 when retrying non-existent video")
+    void shouldReturn404WhenRetryingNonExistentVideo() throws Exception {
+        when(videoService.retryVideo("unknown_vid")).thenReturn(Optional.empty());
+
+        mockMvc.perform(post("/api/v1/youtube/videos/unknown_vid/retry")
+                        .header("X-API-Key", API_KEY))
+                .andExpect(status().isNotFound());
     }
 }

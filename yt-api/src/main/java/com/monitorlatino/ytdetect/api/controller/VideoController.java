@@ -1,6 +1,7 @@
 package com.monitorlatino.ytdetect.api.controller;
 
 import com.monitorlatino.ytdetect.api.dto.FullVideoTranscriptResponse;
+import com.monitorlatino.ytdetect.api.dto.RetryVideosResponse;
 import com.monitorlatino.ytdetect.api.dto.VideoResponse;
 import com.monitorlatino.ytdetect.api.dto.VideoTranscriptionResponse;
 import com.monitorlatino.ytdetect.api.service.VideoTranscriptAssemblyService;
@@ -12,6 +13,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -56,6 +58,18 @@ public class VideoController {
     public ResponseEntity<FullVideoTranscriptResponse> getFullTranscript(
             @PathVariable("videoId") String videoId) {
         return transcriptAssemblyService.assembleTranscript(videoId)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/retry-failed")
+    public ResponseEntity<RetryVideosResponse> retryAllFailedVideos() {
+        return ResponseEntity.ok(videoService.retryAllFailedVideos());
+    }
+
+    @PostMapping("/{videoId}/retry")
+    public ResponseEntity<VideoResponse> retryVideo(@PathVariable("videoId") String videoId) {
+        return videoService.retryVideo(videoId)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

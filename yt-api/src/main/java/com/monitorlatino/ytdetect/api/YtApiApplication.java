@@ -48,6 +48,14 @@ public class YtApiApplication {
                 log.warn("Could not load .env file: {}", e.getMessage());
             }
         }
+        if (System.getProperty("aws.region") == null) {
+            String region = System.getProperty("AWS_REGION", System.getenv().getOrDefault("AWS_REGION", "us-west-2"));
+            System.setProperty("aws.region", region);
+        }
+        if (System.getProperty("aws.accessKeyId") == null && (System.getenv("AWS_ACCESS_KEY_ID") == null || System.getenv("AWS_ACCESS_KEY_ID").isBlank())) {
+            System.setProperty("aws.accessKeyId", "dummy");
+            System.setProperty("aws.secretAccessKey", "dummy");
+        }
     }
 
     @Bean

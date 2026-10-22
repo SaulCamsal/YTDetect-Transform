@@ -157,3 +157,25 @@ Dispara de forma asíncrona o sincrónica la lectura de `subscriptions.list?mine
 }
 ```
 
+### 2.4 Reintentar todos los videos fallidos
+`POST /api/v1/youtube/videos/retry-failed`
+
+Toma todos los videos en estado `FAILED`, restablece `attemptCount = 0`, limpia `lastErrorCode` y `lastErrorMessage`, y cambia su estado a `QUEUED_DOWNLOAD` para que el worker los procese de nuevo.
+
+**Response (200 OK):**
+```json
+{
+  "retriedCount": 2,
+  "videoIds": ["abc123xyz", "def456uvw"]
+}
+```
+
+### 2.5 Reintentar un video específico
+`POST /api/v1/youtube/videos/{videoId}/retry`
+
+Restablece el estado de un video individual a `QUEUED_DOWNLOAD`, reiniciando su contador de intentos.
+
+**Response (200 OK):** Objeto `VideoResponse` actualizado con `status = QUEUED_DOWNLOAD`.
+**Response (404 Not Found):** Si el `videoId` no existe.
+
+
