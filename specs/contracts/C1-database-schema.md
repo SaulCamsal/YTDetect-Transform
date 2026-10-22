@@ -67,7 +67,7 @@ Tabla estándar para la librería ShedLock (manejo de ejecución concurrente de 
 - `locked_at` (DATETIME2(3) NOT NULL)
 - `locked_by` (VARCHAR(255) NOT NULL)
 
-### 5. Tabla `youtube.youtubeSubtitleTranscript`
+### 5. Tabla `youtube.youtube_subtitle_transcript`
 Almacena transcripciones obtenidas directamente desde los subtítulos de YouTube fragmentadas en bloques de 5 minutos, con formato idéntico a `transcription.transcription_result`.
 - `result_seq` (BIGINT IDENTITY PRIMARY KEY)
 - `id` (UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID())

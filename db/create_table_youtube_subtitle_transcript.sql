@@ -7,13 +7,13 @@
 USE MonitorTranscription;
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE schema_id = SCHEMA_ID('youtube') AND name = 'youtubeSubtitleTranscript')
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE schema_id = SCHEMA_ID('youtube') AND name = 'youtube_subtitle_transcript')
 BEGIN
-    CREATE TABLE youtube.youtubeSubtitleTranscript (
-        result_seq             BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_youtubeSubtitleTranscript PRIMARY KEY,
+    CREATE TABLE youtube.youtube_subtitle_transcript (
+        result_seq             BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT pk_youtube_subtitle_transcript PRIMARY KEY,
         id                     UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
         job_id                 UNIQUEIDENTIFIER NOT NULL,
-        video_id               VARCHAR(50) NOT NULL CONSTRAINT fk_youtubeSubtitleTranscript_video REFERENCES youtube.youtube_video(video_id),
+        video_id               VARCHAR(50) NOT NULL CONSTRAINT fk_youtube_subtitle_transcript_video REFERENCES youtube.youtube_video(video_id),
         chunk_index            INT NOT NULL,
         start_seconds          DECIMAL(12,3) NOT NULL,
         end_seconds            DECIMAL(12,3) NOT NULL,
@@ -29,9 +29,9 @@ BEGIN
         segments_raw_bytes     INT NULL,
         segment_count          INT NULL,
         created_at             DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
-        CONSTRAINT uq_youtubeSubtitleTranscript_video_chunk UNIQUE (video_id, chunk_index)
+        CONSTRAINT uq_youtube_subtitle_transcript_video_chunk UNIQUE (video_id, chunk_index)
     );
 
-    CREATE INDEX ix_youtubeSubtitleTranscript_video ON youtube.youtubeSubtitleTranscript(video_id, chunk_index);
+    CREATE INDEX ix_youtube_subtitle_transcript_video ON youtube.youtube_subtitle_transcript(video_id, chunk_index);
 END
 GO

@@ -19,9 +19,9 @@ import java.util.UUID;
 @Entity
 @Table(
         schema = "youtube",
-        name = "`youtubeSubtitleTranscript`",
+        name = "youtube_subtitle_transcript",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uq_youtubeSubtitleTranscript_video_chunk", columnNames = {"video_id", "chunk_index"})
+                @UniqueConstraint(name = "uq_youtube_subtitle_transcript_video_chunk", columnNames = {"video_id", "chunk_index"})
         }
 )
 public class YoutubeSubtitleTranscript {
