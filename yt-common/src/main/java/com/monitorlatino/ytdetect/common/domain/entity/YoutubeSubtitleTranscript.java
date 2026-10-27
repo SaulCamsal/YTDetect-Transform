@@ -86,6 +86,15 @@ public class YoutubeSubtitleTranscript {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    // Emisora (youtube_channel.station_id) y hora local al aire del bloque, calculadas igual que
+    // youtube_audio_chunk.aired_at_local. Las usa analytics.vw_contenido para tratar los subtítulos
+    // como una transcripción más (detector de IA y reportes).
+    @Column(name = "station_id")
+    private Integer stationId;
+
+    @Column(name = "aired_at_local")
+    private LocalDateTime airedAtLocal;
+
     public YoutubeSubtitleTranscript() {
     }
 
@@ -260,6 +269,22 @@ public class YoutubeSubtitleTranscript {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Integer getStationId() {
+        return stationId;
+    }
+
+    public void setStationId(Integer stationId) {
+        this.stationId = stationId;
+    }
+
+    public LocalDateTime getAiredAtLocal() {
+        return airedAtLocal;
+    }
+
+    public void setAiredAtLocal(LocalDateTime airedAtLocal) {
+        this.airedAtLocal = airedAtLocal;
     }
 
     @Override

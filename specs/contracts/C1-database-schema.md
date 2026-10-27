@@ -83,10 +83,14 @@ Almacena transcripciones obtenidas directamente desde los subtítulos de YouTube
 - `realtime_factor` (DECIMAL(12,2) NULL)
 - `model_name` (VARCHAR(50) NULL)
 - `worker_host` (VARCHAR(255) NULL)
-- `transcript_text` (VARCHAR(MAX) NULL)
+- `transcript_text` (VARCHAR(MAX) COLLATE Latin1_General_100_CI_AI_SC_UTF8 NULL) - misma collation que `transcription.transcription_result`
 - `segments_gz` (VARBINARY(MAX) NULL)
 - `segments_raw_bytes` (INT NULL)
 - `segment_count` (INT NULL)
 - `created_at` (DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME())
+- `station_id` (INT NULL) - copia de `youtube_channel.station_id` al guardar (= `analytics.fuente.fuente_id`)
+- `aired_at_local` (DATETIME2(0) NULL) - hora local al aire del bloque: misma regla que `youtube_audio_chunk.aired_at_local` (`virtual_start` o `published_at` en la zona del canal, + `chunk_index * 300 s`)
+
+`station_id` y `aired_at_local` permiten que `analytics.vw_contenido` (TranscriptApi) trate estos bloques como una transcripción más: el detector de IA y los reportes los procesan igual que los de Whisper.
 - `UQ (video_id, chunk_index)`
 

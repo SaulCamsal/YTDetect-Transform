@@ -155,7 +155,7 @@ public class DownloadJobListener {
                         video.getVideoId(), subResult.cues().size(), subResult.language());
 
                 List<YoutubeSubtitleTranscript> transcripts = subtitleChunkingService.createChunks(
-                        video, subResult.cues(), subResult.language());
+                        video, subResult.cues(), subResult.language(), resolveBaseAiredAt(video, channel));
 
                 subtitleTranscriptRepository.saveAll(transcripts);
 
@@ -182,12 +182,7 @@ public class DownloadJobListener {
         video = videoRepository.save(video);
 
         // 3. Upload chunks to S3 and dispatch transcription
-        ZoneId zoneId = ZoneId.of(channel.getTimezone() != null ? channel.getTimezone() : "America/Mexico_City");
-        LocalDateTime baseAiredAt = (video.getVirtualStart() != null)
-                ? video.getVirtualStart()
-                : (video.getPublishedAt() != null
-                ? LocalDateTime.ofInstant(video.getPublishedAt(), zoneId)
-                : LocalDateTime.now(clock.withZone(zoneId)));
+        LocalDateTime baseAiredAt = resolveBaseAiredAt(video, channel);
 
         int chunkDurationSec = audioProcessingService.getChunkDurationSeconds();
         String targetBucket = s3AudioUploadService.getDefaultBucket();
@@ -277,6 +272,21 @@ public class DownloadJobListener {
         }
 
         videoRepository.save(video);
+    }
+
+    /**
+     * Hora local al aire del inicio del video: virtual_start, o published_at en la zona del canal,
+     * o ahora. La comparten el camino de audio y el de subtítulos para que un mismo bloque
+     * quede con la misma hora sin importar por cuál camino se transcribió.
+     */
+    LocalDateTime resolveBaseAiredAt(YoutubeVideo video, YoutubeChannel channel) {
+        ZoneId zoneId = ZoneId.of(channel != null && channel.getTimezone() != null ? channel.getTimezone() : "America/Mexico_City");
+        if (video.getVirtualStart() != null) {
+            return video.getVirtualStart();
+        }
+        return video.getPublishedAt() != null
+                ? LocalDateTime.ofInstant(video.getPublishedAt(), zoneId)
+                : LocalDateTime.now(clock.withZone(zoneId));
     }
 
     private File createWorkingDir(String videoId) throws Exception {

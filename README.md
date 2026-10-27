@@ -299,7 +299,7 @@ Abre dos terminales (una para `yt-api` y otra para `yt-worker`):
 # Linux / macOS
 ./mvnw spring-boot:run -pl yt-api
 ```
-*`yt-api` se iniciará por defecto en el puerto `8080` (o el configurado en `application.yml`).*
+*`yt-api` se iniciará por defecto en el puerto `8083` (o el configurado en `application.yml`).*
 
 **Terminal 2 — Iniciar el Trabajador de Descargas (`yt-worker`):**
 ```powershell
@@ -331,12 +331,12 @@ Si prefieres empaquetar y ejecutar los archivos compilados:
            [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), "Process")
        }
    }
-   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8080
+   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8083
    ```
    ```bash
    # Linux / macOS
    export $(grep -v '^#' .env | xargs)
-   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8080
+   java -jar yt-api/target/yt-api-0.0.1-SNAPSHOT.jar --server.port=8083
    ```
 
 3. **Cargar variables de `.env` y ejecutar `yt-worker`:**
@@ -401,7 +401,7 @@ curl -X POST http://localhost:8082/api/v1/youtube/channels/sync \
 #### E. Sincronizar estaciones desde la Base de Datos de Reporting
 Escanea la base de datos `Reporting` en la misma instancia de SQL Server (`id_country = 27` y `stream_owner LIKE '%youtube%'`), resuelve su handle/canal y los registra automáticamente en `MonitorTranscription`:
 ```bash
-curl -X POST http://localhost:8080/api/v1/youtube/channels/sync-reporting \
+curl -X POST http://localhost:8083/api/v1/youtube/channels/sync-reporting \
   -H "X-API-Key: default-secret-key"
 ```
 *(Nota: Este sincronizador también se ejecuta automáticamente cada 24 horas a las 04:00 AM UTC mediante un job programado `@Scheduled`).*

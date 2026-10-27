@@ -46,10 +46,15 @@ public class SubtitleChunkingService {
         this.hostname = resolveHostname();
     }
 
+    /**
+     * @param baseAiredAt hora local al aire del inicio del video (misma regla que el camino de audio).
+     *                    Cada bloque queda en baseAiredAt + chunkIndex * chunkDurationSeconds.
+     */
     public List<YoutubeSubtitleTranscript> createChunks(
             YoutubeVideo video,
             List<SubtitleCue> cues,
-            String detectedLanguage) {
+            String detectedLanguage,
+            LocalDateTime baseAiredAt) {
 
         if (cues == null || cues.isEmpty()) {
             return List.of();
@@ -77,6 +82,7 @@ public class SubtitleChunkingService {
                 cues.size(), chunkCount, totalDuration, video.getVideoId());
 
         List<YoutubeSubtitleTranscript> transcripts = new ArrayList<>(chunkCount);
+        Integer stationId = (video.getChannel() != null) ? video.getChannel().getStationId() : null;
 
         for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
             double chunkStart = chunkIndex * chunkDurationSeconds;
@@ -121,6 +127,10 @@ public class SubtitleChunkingService {
                 transcript.setSegmentsRawBytes(rawJsonBytes.length);
                 transcript.setSegmentCount(chunkCues.size());
                 transcript.setCreatedAt(LocalDateTime.now(clock));
+                transcript.setStationId(stationId);
+                transcript.setAiredAtLocal(baseAiredAt != null
+                        ? baseAiredAt.plusSeconds((long) chunkIndex * chunkDurationSeconds)
+                        : null);
 
                 transcripts.add(transcript);
             } catch (IOException e) {

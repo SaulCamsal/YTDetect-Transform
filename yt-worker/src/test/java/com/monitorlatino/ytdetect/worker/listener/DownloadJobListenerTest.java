@@ -313,7 +313,7 @@ class DownloadJobListenerTest {
 
         YoutubeSubtitleTranscript mockTranscript = new YoutubeSubtitleTranscript();
         mockTranscript.setChunkIndex(0);
-        when(subtitleChunkingService.createChunks(any(), eq(cues), eq("es"))).thenReturn(List.of(mockTranscript));
+        when(subtitleChunkingService.createChunks(any(), eq(cues), eq("es"), any())).thenReturn(List.of(mockTranscript));
 
         DownloadJobMessage message = new DownloadJobMessage("vid_fast", "UC_FAST", "https://youtube.com/watch?v=vid_fast");
         listener.onDownloadJob(message);
@@ -325,5 +325,27 @@ class DownloadJobListenerTest {
         verify(s3AudioUploadService, never()).uploadChunk(any(), any(), any());
         verify(audioArrivalQueueService, never()).sendAudioArrival(any());
         verify(transcriptionApiClient, never()).submitTranscription(any());
+    }
+
+    @Test
+    @DisplayName("Fast-path should pass the same base aired time as the audio path (published_at in channel timezone)")
+    void fastPathUsesChannelLocalAiredTime(@TempDir File tempDir) throws Exception {
+        YoutubeChannel channel = new YoutubeChannel("UC_FAST2", "Fast Channel 2", ChannelOrigin.SUBSCRIPTION);
+        channel.setStationId(201);
+        channel.setTimezone("America/Mexico_City");
+        YoutubeVideo video = new YoutubeVideo("vid_fast2", channel, "Fast Video 2", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
+        video.setPublishedAt(Instant.parse("2026-10-06T10:00:00Z"));   // 04:00 en CDMX
+
+        when(videoRepository.findByVideoId("vid_fast2")).thenReturn(Optional.of(video));
+        when(videoRepository.save(any(YoutubeVideo.class))).thenAnswer(i -> i.getArgument(0));
+        List<SubtitleCue> cues = List.of(new SubtitleCue(1.0, 5.0, "Hola"));
+        when(subtitleExtractionService.extractSubtitles(anyString(), any()))
+                .thenReturn(Optional.of(new SubtitleExtractionResult("es", cues)));
+        when(subtitleChunkingService.createChunks(any(), eq(cues), eq("es"), any())).thenReturn(List.of(new YoutubeSubtitleTranscript()));
+
+        listener.onDownloadJob(new DownloadJobMessage("vid_fast2", "UC_FAST2", "https://youtube.com/watch?v=vid_fast2"));
+
+        verify(subtitleChunkingService).createChunks(any(), eq(cues), eq("es"),
+                eq(java.time.LocalDateTime.of(2026, 10, 6, 4, 0, 0)));
     }
 }

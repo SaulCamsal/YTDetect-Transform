@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.LocalDateTime;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -38,6 +39,7 @@ class SubtitleChunkingServiceTest {
     @DisplayName("Should split cues into 300-second chunks with valid GZIP segments and relative offsets")
     void shouldSplitCuesInto300SecondChunks() throws IOException {
         YoutubeChannel channel = new YoutubeChannel("UC_TEST", "Test Channel", ChannelOrigin.SUBSCRIPTION);
+        channel.setStationId(9001);
         YoutubeVideo video = new YoutubeVideo("vid_chunk_test", channel, "Title", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
         video.setDurationSeconds(700); // 700s = 3 chunks (0..300, 300..600, 600..700)
 
@@ -48,9 +50,16 @@ class SubtitleChunkingServiceTest {
                 new SubtitleCue(620.0, 6.0, "Tercer bloque final")
         );
 
-        List<YoutubeSubtitleTranscript> chunks = service.createChunks(video, cues, "es");
+        LocalDateTime base = LocalDateTime.of(2026, 10, 15, 6, 0, 0);
+        List<YoutubeSubtitleTranscript> chunks = service.createChunks(video, cues, "es", base);
 
         assertEquals(3, chunks.size());
+
+        // Emisora y hora al aire por bloque (lo que lee analytics.vw_contenido)
+        assertEquals(9001, chunks.get(0).getStationId());
+        assertEquals(base, chunks.get(0).getAiredAtLocal());
+        assertEquals(base.plusSeconds(300), chunks.get(1).getAiredAtLocal());
+        assertEquals(base.plusSeconds(600), chunks.get(2).getAiredAtLocal());
 
         // Chunk 0: [0, 300]
         YoutubeSubtitleTranscript chunk0 = chunks.get(0);
@@ -110,7 +119,7 @@ class SubtitleChunkingServiceTest {
         YoutubeChannel channel = new YoutubeChannel("UC_TEST", "Test Channel", ChannelOrigin.SUBSCRIPTION);
         YoutubeVideo video = new YoutubeVideo("vid_empty", channel, "Title", VideoStatus.QUEUED_DOWNLOAD, DiscoveredVia.WEBSUB);
 
-        assertTrue(service.createChunks(video, List.of(), "es").isEmpty());
-        assertTrue(service.createChunks(video, null, "es").isEmpty());
+        assertTrue(service.createChunks(video, List.of(), "es", null).isEmpty());
+        assertTrue(service.createChunks(video, null, "es", null).isEmpty());
     }
 }
