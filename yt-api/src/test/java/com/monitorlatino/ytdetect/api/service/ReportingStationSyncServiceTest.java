@@ -77,9 +77,20 @@ class ReportingStationSyncServiceTest {
         assertNotNull(p3);
         assertEquals("UCfxHplbcoJK9m70c4VyTIxg", p3.channelId());
 
+        // Custom URL / handle without @ in URL
+        var p4 = ReportingStationSyncService.parseStreamOwner("https://www.youtube.com/AztecaNoticias");
+        assertNotNull(p4);
+        assertEquals("@AztecaNoticias", p4.handle());
+
+        // Custom URL with /c/
+        var p5 = ReportingStationSyncService.parseStreamOwner("https://www.youtube.com/c/AztecaNoticias");
+        assertNotNull(p5);
+        assertEquals("@AztecaNoticias", p5.handle());
+
         // Invalid or empty
         assertNull(ReportingStationSyncService.parseStreamOwner(""));
         assertNull(ReportingStationSyncService.parseStreamOwner("https://example.com/radio"));
+        assertNull(ReportingStationSyncService.parseStreamOwner("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
     }
 
     @Test

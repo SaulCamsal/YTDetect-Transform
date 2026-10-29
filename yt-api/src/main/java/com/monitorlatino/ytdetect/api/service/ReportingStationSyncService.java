@@ -30,6 +30,11 @@ public class ReportingStationSyncService {
 
     private static final Pattern CHANNEL_ID_PATTERN = Pattern.compile("(?i)(?:channel/|c/|u/|user/)?(UC[a-zA-Z0-9_-]{22})");
     private static final Pattern HANDLE_PATTERN = Pattern.compile("(?i)(@[a-zA-Z0-9_.-]+)");
+    private static final Pattern CUSTOM_URL_PATTERN = Pattern.compile("(?i)(?:https?://)?(?:www\\.)?youtube\\.com/(?:c/|user/)?([a-zA-Z0-9_.-]+)(?:/(?:videos|featured|about|community|streams|podcasts))?/?$");
+
+    private static final java.util.Set<String> RESERVED_PATH_SEGMENTS = java.util.Set.of(
+            "watch", "playlist", "feed", "channel", "results", "shorts", "live", "embed", "attribution_link", "gaming", "music"
+    );
 
     private final JdbcTemplate jdbcTemplate;
     private final YoutubeChannelRepository channelRepository;
@@ -50,7 +55,7 @@ public class ReportingStationSyncService {
         this.syncQuery = syncQuery;
     }
 
-    @Scheduled(cron = "${yt.reporting-sync.cron:0 0 4 * * *}")
+    @Scheduled(cron = "${yt.reporting-sync.cron:0 0 * * * *}")
     @SchedulerLock(name = "reporting_station_sync", lockAtMostFor = "15m", lockAtLeastFor = "1m")
     public void scheduledSync() {
         log.info("Starting scheduled synchronization of YouTube stations from Reporting DB");
@@ -233,19 +238,37 @@ public class ReportingStationSyncService {
         }
 
         String trimmed = streamOwner.trim();
+        int queryIdx = trimmed.indexOf('?');
+        if (queryIdx >= 0) {
+            trimmed = trimmed.substring(0, queryIdx);
+        }
+        int hashIdx = trimmed.indexOf('#');
+        if (hashIdx >= 0) {
+            trimmed = trimmed.substring(0, hashIdx);
+        }
 
         // 1. Check for Channel ID (UC...)
         Matcher channelMatcher = CHANNEL_ID_PATTERN.matcher(trimmed);
         if (channelMatcher.find()) {
             String channelId = channelMatcher.group(1);
-            return new ParsedOwner(trimmed, null, channelId);
+            return new ParsedOwner(streamOwner.trim(), null, channelId);
         }
 
         // 2. Check for Handle (@...)
         Matcher handleMatcher = HANDLE_PATTERN.matcher(trimmed);
         if (handleMatcher.find()) {
             String handle = handleMatcher.group(1);
-            return new ParsedOwner(trimmed, handle, null);
+            return new ParsedOwner(streamOwner.trim(), handle, null);
+        }
+
+        // 3. Check for custom URL or handle without @ (e.g. youtube.com/AztecaNoticias)
+        Matcher customMatcher = CUSTOM_URL_PATTERN.matcher(trimmed);
+        if (customMatcher.find()) {
+            String identifier = customMatcher.group(1);
+            if (identifier != null && !identifier.isBlank() && !RESERVED_PATH_SEGMENTS.contains(identifier.toLowerCase())) {
+                String handle = identifier.startsWith("@") ? identifier : "@" + identifier;
+                return new ParsedOwner(streamOwner.trim(), handle, null);
+            }
         }
 
         return null;
